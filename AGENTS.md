@@ -56,6 +56,17 @@ web/             — Frontend themes container
 
 ## Rules
 
+### Fork Maintenance Rules
+
+- Keep `main` as the upstream-mirror branch. Only sync official upstream changes into `main`; do not merge temporary external PRs or deployment-only patches there.
+- Use `deploy/main` or another explicitly documented deployment branch for production releases that include urgent temporary patches ahead of upstream.
+- Preserve provenance for external PRs. Keep raw imported PR code on `vendor/pr-<number>` branches without local edits; put local compatibility fixes on `compat/pr-<number>` or normal feature branches.
+- Every temporary patch intended for a deployment branch MUST be recorded in `docs/patches.md` before merge. Record the source PR/repository, imported branch, deployed branch, commit range, status, data impact, rollback plan, and expected official replacement path.
+- Read `docs/fork-maintenance.md` before importing, merging, reverting, or replacing external PRs that are not yet part of official upstream.
+- Prefer merge commits for temporary external PRs so the source boundary stays visible. Do not squash imported PR branches unless `docs/patches.md` records the reason.
+- Temporary patches should avoid destructive data changes. Prefer additive migrations, backward-compatible reads, dual writes when formats diverge, and feature flags for behavior that may need to be disabled during rollback.
+- When official upstream later merges an equivalent feature, compare it against the patch record, remove only the remaining local delta after validation, and update the patch status in `docs/patches.md`.
+
 ### Common Code Quality
 
 - New code should stay direct and readable. Prefer early returns, clear branches, and well-named local variables to deep nesting or layered control flow.
