@@ -3,9 +3,14 @@ name: Publish Docker image (desirecore manual branch)
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Branch name to build (e.g. deploy/main, alpha, nightly)"
+      ref:
+        description: "Git ref to build (branch, tag, or SHA; e.g. deploy/main)"
         required: true
+        default: "deploy/main"
+        type: string
+      tag_prefix:
+        description: "Docker tag prefix (optional; defaults to sanitized ref)"
+        required: false
         type: string
 
 env:
@@ -19,18 +24,18 @@ jobs:
     name: Prepare Docker tags
     runs-on: ubuntu-latest
     outputs:
-      branch: ${{ steps.version.outputs.branch }}
+      ref: ${{ steps.version.outputs.ref }}
       sha: ${{ steps.version.outputs.sha }}
       tag_prefix: ${{ steps.version.outputs.tag_prefix }}
       version: ${{ steps.version.outputs.version }}
     permissions:
       contents: read
     steps:
-      - name: Check out branch
+      - name: Check out ref
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
-          ref: ${{ inputs.branch }}
+          ref: ${{ inputs.ref }}
 
       - name: Validate image configuration
         run: |
@@ -46,13 +51,15 @@ jobs:
       - name: Resolve Docker tags
         id: version
         env:
-          BRANCH_NAME: ${{ inputs.branch }}
+          SOURCE_REF: ${{ inputs.ref }}
+          TAG_PREFIX_INPUT: ${{ inputs.tag_prefix }}
         run: |
-          TAG_PREFIX=$(printf '%s' "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
+          RAW_TAG_PREFIX="${TAG_PREFIX_INPUT:-$SOURCE_REF}"
+          TAG_PREFIX=$(printf '%s' "$RAW_TAG_PREFIX" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
           TAG_PREFIX=${TAG_PREFIX:0:105}
           TAG_PREFIX=$(printf '%s' "$TAG_PREFIX" | sed -E 's/[.-]+$//')
           if [ -z "$TAG_PREFIX" ]; then
-            echo "::error::Branch '$BRANCH_NAME' cannot be converted to a valid Docker tag prefix"
+            echo "::error::Ref/tag '$RAW_TAG_PREFIX' cannot be converted to a valid Docker tag prefix"
             exit 1
           fi
 
@@ -60,11 +67,11 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           VERSION="${TAG_PREFIX}-$(date +'%Y%m%d')-${SHORT_SHA}"
 
-          echo "branch=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+          echo "ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag_prefix=$TAG_PREFIX" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Prepared Docker tags for $BRANCH_NAME at $SHORT_SHA"
+          echo "Prepared Docker tags for $SOURCE_REF at $SHORT_SHA"
 
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
@@ -85,7 +92,7 @@ jobs:
       id-token: write
       packages: write
     steps:
-      - name: Check out branch
+      - name: Check out ref
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
