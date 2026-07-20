@@ -50,7 +50,8 @@ Deploy support for Ali `wan2.7-*` and `happyhorse-1.0-*` video generation models
 #### Verification
 
 - Inspected changed files and diff against `main`.
-- Pending after merge: run targeted Go tests or a full Docker build if deployment timing allows.
+- `go test ./relay/channel/task/ali` passed after the initial deployment merge.
+- `go test ./relay/channel/task/ali` passed again after upgrading the deployment baseline to official `v1.0.0-rc.21`.
 
 #### Rollback Plan
 
@@ -63,6 +64,7 @@ When upstream merges PR 4810 or an alternative implementation, sync upstream, co
 #### History
 
 - `2026-07-07`: Imported PR 4810 into `vendor/pr-4810` and prepared it for `deploy/main`.
+- `2026-07-20`: Verified the patch remains deploy-only and retained it while upgrading the deployment baseline to official `v1.0.0-rc.21`.
 
 ## Patch Entry Template
 

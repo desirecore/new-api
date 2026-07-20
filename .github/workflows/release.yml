@@ -12,6 +12,7 @@ on:
     tags:
       - '*'
       - '!*-alpha*'
+      - '!*-desirecore.*'
 
 jobs:
   linux:
