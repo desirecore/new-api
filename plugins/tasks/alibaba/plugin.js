@@ -81,15 +81,20 @@ function isVideoEditModel(model) {
   return name.includes("videoedit") || name.includes("video-edit");
 }
 
-function values(value) {
+function arrayValues(value) {
   return Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
 }
 
 function appendMedia(media, type, candidates) {
-  for (const candidate of values(candidates)) {
+  for (const candidate of arrayValues(candidates)) {
     const url = trimmed(candidate);
     if (!url) continue;
-    if (!media.some(function (item) { return item && item.type === type && item.url === url; })) media.push({ type: type, url: url });
+    if (
+      !media.some(function (item) {
+        return item && item.type === type && item.url === url;
+      })
+    )
+      media.push({ type: type, url: url });
   }
 }
 
@@ -101,7 +106,9 @@ function normalizeNewFormatInput(input, req, model) {
   appendMedia(requestImages, "image", req.images);
   appendMedia(requestImages, "image", req.input_reference);
   appendMedia(requestImages, "image", req.image_url);
-  const imageURLs = requestImages.map(function (item) { return item.url; });
+  const imageURLs = requestImages.map(function (item) {
+    return item.url;
+  });
 
   if (String(model).startsWith("wan2.7-i2v")) {
     const first = trimmed(input.first_frame_url) || trimmed(input.img_url) || imageURLs[0] || firstImage(req);
@@ -134,9 +141,9 @@ function hasMediaInput(req) {
   const metadataInput = req && req.metadata && req.metadata.input;
   return Boolean(
     firstImage(req || {}) ||
-      values(req && req.image_url).some(trimmed) ||
-      values(req && req.video_url).some(trimmed) ||
-      (metadataInput && Array.isArray(metadataInput.media) && metadataInput.media.length),
+    arrayValues(req && req.image_url).some(trimmed) ||
+    arrayValues(req && req.video_url).some(trimmed) ||
+    (metadataInput && Array.isArray(metadataInput.media) && metadataInput.media.length)
   );
 }
 
@@ -149,7 +156,8 @@ function convert(ctx) {
   const parameters = { prompt_extend: true, duration: 5 };
 
   if (req.size) {
-    if (String(upstreamModel).includes("t2v") && !isNewFormatModel(upstreamModel) && !String(req.size).includes("*")) throw new Error("invalid size: " + req.size + ", example: 1920*1080");
+    if (String(upstreamModel).includes("t2v") && !isNewFormatModel(upstreamModel) && !String(req.size).includes("*"))
+      throw new Error("invalid size: " + req.size + ", example: 1920*1080");
     if (String(req.size).includes("*")) parameters.size = req.size;
     else parameters.resolution = normalizeResolution(req.size);
   } else if (isNewFormatModel(upstreamModel)) {
