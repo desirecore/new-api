@@ -27,6 +27,19 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 		}
 	})
 
+	t.Run("claims deployed PR 4810 models", func(t *testing.T) {
+		for _, model := range []string{
+			"wan2.7-r2v",
+			"wan2.7-videoedit",
+			"happyhorse-1.0-t2v",
+			"happyhorse-1.0-i2v",
+			"happyhorse-1.0-r2v",
+			"happyhorse-1.0-video-edit",
+		} {
+			assert.Contains(t, plugin.Meta.Models, model)
+		}
+	})
+
 	t.Run("declares documented usage facts", func(t *testing.T) {
 		require.Len(t, plugin.Meta.UsageSchema, 2)
 		for _, key := range []string{"seconds", "resolution"} {
@@ -137,6 +150,180 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "", requestBody["prompt"])
 		assert.Equal(t, []any{"https://cdn.example/first.png"}, requestBody["images"])
+	})
+
+	t.Run("maps wan2.7 first frame last frame and audio media", func(t *testing.T) {
+		value, callErr := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+			"baseUrl":       "https://dashscope.example",
+			"apiKey":        "secret",
+			"model":         "wan2.7-i2v",
+			"upstreamModel": "wan2.7-i2v",
+			"requestBody": map[string]any{
+				"model":     "wan2.7-i2v",
+				"prompt":    "animate between frames",
+				"images":    []any{"https://cdn.example/first.png", "https://cdn.example/last.png"},
+				"audio_url": "https://cdn.example/voice.mp3",
+			},
+		})
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var request map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &request))
+
+		body, ok := request["body"].(map[string]any)
+		require.True(t, ok)
+		input, ok := body["input"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, []any{
+			map[string]any{"type": "first_frame", "url": "https://cdn.example/first.png"},
+			map[string]any{"type": "last_frame", "url": "https://cdn.example/last.png"},
+			map[string]any{"type": "driving_audio", "url": "https://cdn.example/voice.mp3"},
+		}, input["media"])
+		assert.NotContains(t, input, "img_url")
+		parameters, ok := body["parameters"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "720P", parameters["resolution"])
+	})
+
+	t.Run("maps HappyHorse reference media and legacy billing ratio", func(t *testing.T) {
+		ctx := map[string]any{
+			"baseUrl":       "https://dashscope.example",
+			"apiKey":        "secret",
+			"model":         "happyhorse-1.0-r2v",
+			"upstreamModel": "happyhorse-1.0-r2v",
+			"requestBody": map[string]any{
+				"model":     "happyhorse-1.0-r2v",
+				"prompt":    "keep this character",
+				"image_url": []any{"https://cdn.example/reference.png"},
+				"video_url": []any{"https://cdn.example/reference.mp4"},
+				"audio_url": []any{"https://cdn.example/voice.mp3"},
+				"duration":  8,
+			},
+		}
+		value, callErr := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var request map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &request))
+		assert.Equal(t, "image_to_video", request["action"])
+
+		body, ok := request["body"].(map[string]any)
+		require.True(t, ok)
+		input, ok := body["input"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, []any{
+			map[string]any{"type": "reference_image", "url": "https://cdn.example/reference.png"},
+			map[string]any{"type": "reference_video", "url": "https://cdn.example/reference.mp4"},
+			map[string]any{"type": "driving_audio", "url": "https://cdn.example/voice.mp3"},
+		}, input["media"])
+		parameters, ok := body["parameters"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "1080P", parameters["resolution"])
+
+		ctx["usagePurpose"] = "billing_ratios"
+		usageValue, usageErr := plugin.Engine.Call(t.Context(), "extractUsage", ctx)
+		require.NoError(t, usageErr)
+		usageEncoded, marshalUsageErr := common.Marshal(usageValue)
+		require.NoError(t, marshalUsageErr)
+		var ratios map[string]float64
+		require.NoError(t, common.Unmarshal(usageEncoded, &ratios))
+		assert.Equal(t, float64(8), ratios["seconds"])
+		assert.InDelta(t, 1.6/0.9, ratios["resolution-1080P"], 0.000001)
+	})
+
+	t.Run("maps video edit input to video media", func(t *testing.T) {
+		value, callErr := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+			"baseUrl":       "https://dashscope.example",
+			"apiKey":        "secret",
+			"model":         "wan2.7-videoedit",
+			"upstreamModel": "wan2.7-videoedit",
+			"requestBody": map[string]any{
+				"model":     "wan2.7-videoedit",
+				"prompt":    "replace the background",
+				"image_url": "https://cdn.example/reference.png",
+				"video_url": "https://cdn.example/source.mp4",
+			},
+		})
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var request map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &request))
+		body := request["body"].(map[string]any)
+		input := body["input"].(map[string]any)
+		assert.Equal(t, []any{
+			map[string]any{"type": "reference_image", "url": "https://cdn.example/reference.png"},
+			map[string]any{"type": "video", "url": "https://cdn.example/source.mp4"},
+		}, input["media"])
+	})
+
+	t.Run("preserves multipart media URL fields", func(t *testing.T) {
+		value, callErr := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": "happyhorse-1.0-r2v",
+			"body": map[string]any{
+				"kind": "multipart",
+				"fields": map[string]any{
+					"prompt":    []any{"keep this subject"},
+					"image_url": []any{"https://cdn.example/reference-1.png", "https://cdn.example/reference-2.png"},
+					"video_url": []any{"https://cdn.example/reference.mp4"},
+					"audio_url": []any{"https://cdn.example/voice.mp3"},
+				},
+				"files": []any{},
+			},
+		})
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var resolved map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &resolved))
+		assert.Equal(t, "image_to_video", resolved["action"])
+		requestBody := resolved["requestBody"].(map[string]any)
+		assert.Equal(t, []any{"https://cdn.example/reference-1.png", "https://cdn.example/reference-2.png"}, requestBody["image_url"])
+		assert.Equal(t, []any{"https://cdn.example/reference.mp4"}, requestBody["video_url"])
+		assert.Equal(t, []any{"https://cdn.example/voice.mp3"}, requestBody["audio_url"])
+	})
+
+	t.Run("preserves native new-format input", func(t *testing.T) {
+		value, callErr := plugin.Engine.CallPath(t.Context(), "native", []string{"createVideoTask"}, map[string]any{
+			"body": map[string]any{"kind": "json", "value": map[string]any{
+				"model": "happyhorse-1.0-video-edit",
+				"input": map[string]any{
+					"prompt": "edit this clip",
+					"media":  []any{map[string]any{"type": "video", "url": "https://cdn.example/source.mp4"}},
+				},
+				"parameters": map[string]any{"resolution": "1080P", "duration": 10, "audio_setting": "origin"},
+			}},
+		})
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var resolved map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &resolved))
+		requestBody := resolved["requestBody"].(map[string]any)
+		metadata := requestBody["metadata"].(map[string]any)
+		input := metadata["input"].(map[string]any)
+		assert.Equal(t, []any{map[string]any{"type": "video", "url": "https://cdn.example/source.mp4"}}, input["media"])
+		parameters := metadata["parameters"].(map[string]any)
+		assert.Equal(t, "origin", parameters["audio_setting"])
+	})
+
+	t.Run("accepts decimal completion duration", func(t *testing.T) {
+		value, callErr := plugin.Engine.Call(
+			t.Context(),
+			"extractUsageOnComplete",
+			map[string]any{},
+			map[string]any{},
+			map[string]any{"output": map[string]any{"duration": 20.02, "resolution": "1080p"}},
+		)
+		require.NoError(t, callErr)
+		encoded, marshalErr := common.Marshal(value)
+		require.NoError(t, marshalErr)
+		var facts map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &facts))
+		assert.Equal(t, float64(20.02), facts["seconds"])
+		assert.Equal(t, "1080P", facts["resolution"])
 	})
 
 	t.Run("rejects a request without input text", func(t *testing.T) {

@@ -4,15 +4,21 @@ export const meta = {
   name: "Alibaba Bailian",
   icon: "Bailian.Color",
   description: {
-    en: "Alibaba Cloud Bailian Wanxiang video generation (text-to-video and image-to-video)",
-    zh: "阿里云百炼万相视频生成（文生视频、图生视频）",
+    en: "Alibaba Cloud Bailian Wanxiang and HappyHorse video generation",
+    zh: "阿里云百炼万相与 HappyHorse 视频生成",
   },
-  version: "1.0.1",
+  version: "1.0.2",
   author: { name: "QuantumNous" },
   channelTypes: [17],
   models: [
     "wan2.7-i2v",
     "wan2.7-t2v",
+    "wan2.7-r2v",
+    "wan2.7-videoedit",
+    "happyhorse-1.0-t2v",
+    "happyhorse-1.0-i2v",
+    "happyhorse-1.0-r2v",
+    "happyhorse-1.0-video-edit",
     "wan2.5-t2v-preview",
     "wan2.5-i2v-preview",
     "wan2.2-i2v-flash",
@@ -65,6 +71,75 @@ function normalizeResolution(value) {
   return resolution;
 }
 
+function isNewFormatModel(model) {
+  const name = String(model || "");
+  return name.startsWith("wan2.7") || name.startsWith("happyhorse-1.0");
+}
+
+function isVideoEditModel(model) {
+  const name = String(model || "");
+  return name.includes("videoedit") || name.includes("video-edit");
+}
+
+function values(value) {
+  return Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+}
+
+function appendMedia(media, type, candidates) {
+  for (const candidate of values(candidates)) {
+    const url = trimmed(candidate);
+    if (!url) continue;
+    if (!media.some(function (item) { return item && item.type === type && item.url === url; })) media.push({ type: type, url: url });
+  }
+}
+
+function normalizeNewFormatInput(input, req, model) {
+  if (!isNewFormatModel(model)) return;
+  const media = Array.isArray(input.media) ? input.media.slice() : [];
+  const requestImages = [];
+  appendMedia(requestImages, "image", req.image);
+  appendMedia(requestImages, "image", req.images);
+  appendMedia(requestImages, "image", req.input_reference);
+  appendMedia(requestImages, "image", req.image_url);
+  const imageURLs = requestImages.map(function (item) { return item.url; });
+
+  if (String(model).startsWith("wan2.7-i2v")) {
+    const first = trimmed(input.first_frame_url) || trimmed(input.img_url) || imageURLs[0] || firstImage(req);
+    const last = trimmed(input.last_frame_url) || imageURLs[1] || secondImage(req);
+    appendMedia(media, "first_frame", first);
+    appendMedia(media, "last_frame", last);
+  } else {
+    const imageType = String(model).includes("r2v") || isVideoEditModel(model) ? "reference_image" : "first_frame";
+    appendMedia(media, imageType, input.first_frame_url);
+    appendMedia(media, imageType, input.last_frame_url);
+    appendMedia(media, imageType, input.img_url);
+    appendMedia(media, imageType, imageURLs);
+  }
+
+  const videoType = isVideoEditModel(model) ? "video" : "reference_video";
+  appendMedia(media, videoType, input.reference_video_urls);
+  appendMedia(media, videoType, req.video_url);
+  appendMedia(media, "driving_audio", input.audio_url);
+  appendMedia(media, "driving_audio", req.audio_url);
+  if (media.length) input.media = media;
+
+  delete input.img_url;
+  delete input.first_frame_url;
+  delete input.last_frame_url;
+  delete input.audio_url;
+  delete input.reference_video_urls;
+}
+
+function hasMediaInput(req) {
+  const metadataInput = req && req.metadata && req.metadata.input;
+  return Boolean(
+    firstImage(req || {}) ||
+      values(req && req.image_url).some(trimmed) ||
+      values(req && req.video_url).some(trimmed) ||
+      (metadataInput && Array.isArray(metadataInput.media) && metadataInput.media.length),
+  );
+}
+
 function convert(ctx) {
   const req = ctx.requestBody;
   const upstreamModel = ctx.upstreamModel || req.model;
@@ -74,12 +149,14 @@ function convert(ctx) {
   const parameters = { prompt_extend: true, duration: 5 };
 
   if (req.size) {
-    if (String(req.model).includes("t2v") && !String(req.size).includes("*")) throw new Error("invalid size: " + req.size + ", example: 1920*1080");
+    if (String(upstreamModel).includes("t2v") && !isNewFormatModel(upstreamModel) && !String(req.size).includes("*")) throw new Error("invalid size: " + req.size + ", example: 1920*1080");
     if (String(req.size).includes("*")) parameters.size = req.size;
     else parameters.resolution = normalizeResolution(req.size);
-  } else if (String(req.model).includes("t2v")) {
-    parameters.size = String(req.model).startsWith("wan2.5") || String(req.model).startsWith("wan2.2") ? "1920*1080" : "1280*720";
-  } else if (String(req.model).startsWith("wan2.6") || String(req.model).startsWith("wan2.5") || String(req.model).startsWith("wan2.2-i2v-plus")) {
+  } else if (isNewFormatModel(upstreamModel)) {
+    parameters.resolution = String(upstreamModel).startsWith("happyhorse-1.0") ? "1080P" : "720P";
+  } else if (String(upstreamModel).includes("t2v")) {
+    parameters.size = String(upstreamModel).startsWith("wan2.5") || String(upstreamModel).startsWith("wan2.2") ? "1920*1080" : "1280*720";
+  } else if (String(upstreamModel).startsWith("wan2.6") || String(upstreamModel).startsWith("wan2.5") || String(upstreamModel).startsWith("wan2.2-i2v-plus")) {
     parameters.resolution = "1080P";
   } else {
     parameters.resolution = "720P";
@@ -99,20 +176,9 @@ function convert(ctx) {
   if (model !== upstreamModel) throw new Error("can't change model with metadata");
   const body = { model: model, input: input, parameters: parameters };
 
+  normalizeNewFormatInput(input, req, model);
   if (String(model).startsWith("wan2.7-i2v")) {
-    if (!Array.isArray(input.media) || input.media.length === 0) {
-      input.media = [];
-      const first = trimmed(input.first_frame_url) || trimmed(input.img_url) || firstImage(req);
-      const last = trimmed(input.last_frame_url) || secondImage(req);
-      if (first) input.media.push({ type: "first_frame", url: first });
-      if (last) input.media.push({ type: "last_frame", url: last });
-      if (trimmed(input.audio_url)) input.media.push({ type: "driving_audio", url: input.audio_url });
-    }
-    if (input.media.length === 0) throw new Error("wan2.7-i2v requires image, images, input_reference, or input.media");
-    delete input.img_url;
-    delete input.first_frame_url;
-    delete input.last_frame_url;
-    delete input.audio_url;
+    if (!Array.isArray(input.media) || input.media.length === 0) throw new Error("wan2.7-i2v requires image, images, input_reference, or input.media");
   }
   if (!parameters.prompt_extend) delete parameters.prompt_extend;
   if (!parameters.watermark) delete parameters.watermark;
@@ -140,6 +206,14 @@ function resolutionRatio(body) {
       }[body.parameters.size]
     : normalizeResolution(body.parameters.resolution);
   const ratios = {
+    "wan2.7-t2v": { "720P": 1, "1080P": 1 / 0.6 },
+    "wan2.7-i2v": { "720P": 1, "1080P": 1 / 0.6 },
+    "wan2.7-r2v": { "720P": 1, "1080P": 1 / 0.6 },
+    "wan2.7-videoedit": { "720P": 1, "1080P": 1 / 0.6 },
+    "happyhorse-1.0-t2v": { "720P": 1, "1080P": 1.6 / 0.9 },
+    "happyhorse-1.0-i2v": { "720P": 1, "1080P": 1.6 / 0.9 },
+    "happyhorse-1.0-r2v": { "720P": 1, "1080P": 1.6 / 0.9 },
+    "happyhorse-1.0-video-edit": { "720P": 1, "1080P": 1.6 / 0.9 },
     "wan2.6-i2v": { "720P": 1, "1080P": 1 / 0.6 },
     "wan2.5-t2v-preview": { "480P": 1, "720P": 2, "1080P": 1 / 0.3 },
     "wan2.2-t2v-plus": { "480P": 1, "1080P": 5 },
@@ -205,7 +279,7 @@ export function buildSubmitRequest(ctx) {
     method: "POST",
     headers: { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json", "X-DashScope-Async": "enable" },
     body: body,
-    action: firstImage(ctx.requestBody) ? "image_to_video" : "text_to_video",
+    action: hasMediaInput(ctx.requestBody) ? "image_to_video" : "text_to_video",
   };
 }
 
@@ -300,13 +374,14 @@ export const native = {
     return {
       kind: "submit",
       model: req.model,
-      action: input.img_url ? "image_to_video" : "text_to_video",
+      action: input.img_url || (Array.isArray(input.media) && input.media.length) ? "image_to_video" : "text_to_video",
       requestBody: {
         model: req.model,
         prompt: input.prompt || "",
         image: input.img_url,
         duration: parameters.duration,
         size: parameters.size || parameters.resolution,
+        metadata: { input: input, parameters: parameters },
       },
     };
   },
@@ -405,7 +480,7 @@ export const protocols = {
         req = {};
         const fields = ctx.body.fields || {};
         for (const name of Object.keys(fields)) {
-          if (name === "images") req.images = fields[name] || [];
+          if (["images", "image_url", "video_url", "audio_url"].includes(name)) req[name] = fields[name] || [];
           else req[name] = first(name);
         }
         if (req.metadata !== undefined) {
@@ -425,7 +500,7 @@ export const protocols = {
       return {
         kind: "submit",
         model: ctx.model,
-        action: firstImage(req) ? "image_to_video" : "text_to_video",
+        action: hasMediaInput(req) ? "image_to_video" : "text_to_video",
         requestBody: Object.assign({}, req, { model: ctx.model }),
       };
     },
