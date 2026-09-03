@@ -13,7 +13,7 @@ This file tracks patches deployed in this fork before they are accepted upstream
 
 | Patch | Status | Source | Imported Branch | Deployment Branch | Data Impact | Rollback |
 | --- | --- | --- | --- | --- | --- | --- |
-| PR 4810 - Ali wan2.7 and HappyHorse video support | `Deployed` | https://github.com/QuantumNous/new-api/pull/4810 | `vendor/pr-4810` | `deploy/main` | No database migration; relay/API and billing ratio changes only | Revert the vendor merge on `deploy/main`; no data cleanup expected |
+| PR 4810 - Ali wan2.7 and HappyHorse video support | `Deployed` | https://github.com/QuantumNous/new-api/pull/4810 | `vendor/pr-4810` + `compat/pr-4810` | `deploy/main` | No patch-specific migration; task-plugin usage and billing configuration change | Revert the compatibility merge to restore the official Alibaba plugin; no data cleanup expected |
 
 ## Patch Entries
 
@@ -21,9 +21,9 @@ This file tracks patches deployed in this fork before they are accepted upstream
 
 - Status: `Deployed`
 - Source PR/repository: https://github.com/QuantumNous/new-api/pull/4810
-- Source commit range: `05ea01dc6622cf36814377f57f99fc07c0f6c841`, `5cac039e583588fc46233c41c64fcf5024a80861`, `bcf4b0f8697c9f80727f9f4696335a360fb8c157`
+- Source commit range: `05ea01dc6622cf36814377f57f99fc07c0f6c841`, `5cac039e583588fc46233c41c64fcf5024a80861`, `bcf4b0f8697c9f80727f9f4696335a360fb8c157`; plugin compatibility commit `f6520a996998386f4853626cdcac872f87bd3c3d`
 - Imported branch: `vendor/pr-4810`
-- Local compatibility branch: none
+- Local compatibility branch: `compat/pr-4810`
 - Deployment branch: `deploy/main`
 - Date imported: `2026-07-07`
 - Date deployed: `2026-07-07`
@@ -36,35 +36,38 @@ Deploy support for Ali `wan2.7-*` and `happyhorse-1.0-*` video generation models
 #### Upstream Alternatives
 
 - Official upstream PR: https://github.com/QuantumNous/new-api/pull/4810
-- If upstream merges a different Ali video implementation, compare model names, request payload shape, task result parsing, and price ratio handling before replacing this patch.
+- Official task-plugin migration: commit `eb48396d` / PR 7076, which replaces built-in Go task adaptors and partially covers `wan2.7-t2v` and `wan2.7-i2v`.
+- If upstream merges PR 4810 or another Alibaba plugin update, compare model names, request payload shape, usage facts, and billing configuration before replacing this patch.
 
 #### Data Compatibility
 
 - Database schema changes: none.
-- Persisted settings/config changes: none.
+- Persisted settings/config changes: Alibaba factory plugin version changes from `1.0.1` to `1.0.2`. Deployments upgraded across the official task-plugin migration must configure task billing expressions/prices for every enabled video model.
 - Log or audit data changes: none expected beyond normal relay/task logs.
-- API request/response format changes: adds Ali task relay support for new model names and media field mapping for `image_url`, `video_url`, and `audio_url` form fields on new-format Ali video models.
-- Billing/quota/accounting impact: adds price ratio handling for `wan2.7-*` and `happyhorse-1.0-*` Ali video models. The usage duration parsing fix is for upstream response compatibility and is not expected to change settlement because current task result parsing does not bill from those usage fields.
-- Backward/forward compatibility plan: no destructive storage changes. Existing Ali model behavior remains in the same adaptor; rollback should only remove relay support for the new models and the tolerant usage parser.
+- API request/response format changes: adds Alibaba plugin support for `wan2.7-r2v`, `wan2.7-videoedit`, and `happyhorse-1.0-*`, including `image_url`, `video_url`, and `audio_url` media mapping for JSON and multipart requests.
+- Billing/quota/accounting impact: the plugin reports bounded `seconds` and `resolution` usage facts for host-owned pricing and retains legacy resolution ratio output for the added models. Completion usage accepts decimal durations such as `20.02`.
+- Backward/forward compatibility plan: no destructive patch-specific storage changes. Historical platform `17` tasks continue to resolve to the Alibaba plugin, and old upstream task IDs remain readable. The new official baseline adds its own task-plugin table and billing snapshots; rolling back the compatibility patch does not remove those records.
 
 #### Verification
 
 - Inspected changed files and diff against `main`.
 - `go test ./relay/channel/task/ali` passed after the initial deployment merge.
 - `go test ./relay/channel/task/ali` passed again after upgrading the deployment baseline to official `v1.0.0-rc.21`.
+- `go test ./plugins ./pkg/jsplugin ./relay/channel/task/jsplugin ./relay` passed for the plugin compatibility implementation on the post-`v1.0.0-rc.30` official baseline.
 
 #### Rollback Plan
 
-Revert the PR 4810 vendor merge commit from `deploy/main`, then push the branch and rebuild the deployment image. No database cleanup is expected because the patch does not add migrations or persisted schema changes.
+Revert the `compat/pr-4810` merge from `deploy/main` to restore the official Alibaba factory plugin, then rebuild the deployment image. Existing task and plugin records can remain; no database cleanup is expected. This removes the extra models and their media mappings, so disable traffic to those models before rollback.
 
 #### Official Replacement Plan
 
-When upstream merges PR 4810 or an alternative implementation, sync upstream, compare `main...deploy/main`, and remove only the remaining local delta after verifying Ali video task creation, polling, status conversion, URL persistence, and quota settlement.
+When upstream merges PR 4810 or an equivalent Alibaba plugin implementation, compare `plugins/tasks/alibaba/plugin.js` and its usage schema against `compat/pr-4810`. Remove only the remaining local delta after verifying task creation, JSON/multipart media conversion, polling of historical platform `17` tasks, artifact delivery, pre-consume, and final settlement.
 
 #### History
 
 - `2026-07-07`: Imported PR 4810 into `vendor/pr-4810` and prepared it for `deploy/main`.
 - `2026-07-20`: Verified the patch remains deploy-only and retained it while upgrading the deployment baseline to official `v1.0.0-rc.21`.
+- `2026-09-03`: Replaced the obsolete Go adaptor delta with `compat/pr-4810`, based on the official sandboxed task-plugin architecture after `v1.0.0-rc.30`.
 
 ## Patch Entry Template
 
