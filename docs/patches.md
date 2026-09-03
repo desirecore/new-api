@@ -21,7 +21,7 @@ This file tracks patches deployed in this fork before they are accepted upstream
 
 - Status: `Deployed`
 - Source PR/repository: https://github.com/QuantumNous/new-api/pull/4810
-- Source commit range: `05ea01dc6622cf36814377f57f99fc07c0f6c841`, `5cac039e583588fc46233c41c64fcf5024a80861`, `bcf4b0f8697c9f80727f9f4696335a360fb8c157`; plugin compatibility commit `f6520a996998386f4853626cdcac872f87bd3c3d`
+- Source commit range: `05ea01dc6622cf36814377f57f99fc07c0f6c841`, `5cac039e583588fc46233c41c64fcf5024a80861`, `bcf4b0f8697c9f80727f9f4696335a360fb8c157`; plugin compatibility commits `f6520a996998386f4853626cdcac872f87bd3c3d` through `7d7cf46e71f925c8a3c1a6d0ac2134436736e31d`
 - Imported branch: `vendor/pr-4810`
 - Local compatibility branch: `compat/pr-4810`
 - Deployment branch: `deploy/main`
