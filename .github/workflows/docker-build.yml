@@ -5,6 +5,7 @@ on:
     tags:
       - '*'
       - '!nightly*'
+      - '!*-desirecore.*'
   workflow_dispatch:
     inputs:
       tag:

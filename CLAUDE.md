@@ -13,3 +13,4 @@ Rules:
 - Do not replace the Read with a grep, glob, or partial skim.
 - After reading, follow every rule in `AGENTS.md` for the rest of the work.
 - If the task touches `web/`, also Read `web/AGENTS.md` before editing frontend files.
+- Before releases, upgrades, or external PR work, read `docs/fork-maintenance.md` and keep `docs/patches.md` current. Release candidates must start from an official release tag; report publication and deployment verification separately.

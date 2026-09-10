@@ -54,6 +54,22 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 
 ## Rules
 
+### Fork Maintenance Rules
+
+- Release baseline is mandatory: create deployment candidates from an explicitly selected official release tag, not from moving upstream `main`. Import only reviewed, necessary fork patches and release configuration. Inspect both commit history and tree diff against that tag; do not merge patch branches that silently bring newer upstream history.
+- Fork version names MUST identify the actual official tag baseline. Record the upstream tag and peeled commit SHA, fork commit SHA, patch list, image digest, and verification results. Never label an upstream-main snapshot as a release-tag-based build.
+- A successful CI or Docker build proves build/publication only, not deployment rehearsal or production readiness. Validate upgrades on an isolated copy of the deployed database and exercise real client protocols, model mappings, task polling, and billing before claiming readiness. Report unperformed checks explicitly; never assume an older image can safely use an upgraded database without a tested rollback.
+- Read the release baseline and incident rules in `docs/fork-maintenance.md` before preparing any release or production upgrade. Release selection and verification are the agent's responsibility, not assumptions for the user to discover after deployment.
+
+- Keep `main` as the upstream-mirror branch. Only sync official upstream changes into `main`; do not merge temporary external PRs or deployment-only patches there.
+- Use `deploy/main` or another explicitly documented deployment branch for production releases that include urgent temporary patches ahead of upstream.
+- Preserve provenance for external PRs. Keep raw imported PR code on `vendor/pr-<number>` branches without local edits; put local compatibility fixes on `compat/pr-<number>` or normal feature branches.
+- Every temporary patch intended for a deployment branch MUST be recorded in `docs/patches.md` before merge. Record the source PR/repository, imported branch, deployed branch, commit range, status, data impact, rollback plan, and expected official replacement path.
+- Read `docs/fork-maintenance.md` before importing, merging, reverting, or replacing external PRs that are not yet part of official upstream.
+- Prefer merge commits for temporary external PRs so the source boundary stays visible. Do not squash imported PR branches unless `docs/patches.md` records the reason.
+- Temporary patches should avoid destructive data changes. Prefer additive migrations, backward-compatible reads, dual writes when formats diverge, and feature flags for behavior that may need to be disabled during rollback.
+- When official upstream later merges an equivalent feature, compare it against the patch record, remove only the remaining local delta after validation, and update the patch status in `docs/patches.md`.
+
 ### Common Code Quality
 
 - New code should stay direct and readable. Prefer early returns, clear branches, and well-named local variables to deep nesting or layered control flow.
