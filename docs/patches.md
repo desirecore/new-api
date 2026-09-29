@@ -14,8 +14,34 @@ This file tracks patches deployed in this fork before they are accepted upstream
 | Patch | Status | Source | Imported Branch | Deployment Branch | Data Impact | Rollback |
 | --- | --- | --- | --- | --- | --- | --- |
 | PR 4810 - Ali wan2.7 and HappyHorse video support | `Deployed` | https://github.com/QuantumNous/new-api/pull/4810 | `vendor/pr-4810` + `compat/pr-4810` | `deploy/main` | No patch-specific migration; task-plugin usage and billing configuration change | Revert the compatibility merge to restore the official Alibaba plugin; no data cleanup expected |
+| Wan 2.7 image generation protocol guard | `Proposed` | Local fix for desirecore/desirecore#3522 | `codex/wan27-image-route-rc33` | `codex/release-rc33` candidate | No schema migration; two exact model IDs ignore stale `qwen.sync_image_models` when selecting image protocol | Revert the scoped fix; the persisted setting remains unchanged |
 
 ## Patch Entries
+
+### Wan 2.7 image generation protocol guard
+
+- Status: `Proposed`; not merged or deployed.
+- Source: local fix for https://github.com/desirecore/desirecore/issues/3522, commit `39b1b0b`.
+- Patch branch: `codex/wan27-image-route-rc33`.
+- Candidate branch: `codex/release-rc33`; production branch `deploy/main` remains unchanged.
+- Owner: desirecore.
+
+#### Purpose and evidence
+
+The candidate's `Ali` image adaptor chooses the legacy `text2image/image-synthesis` endpoint when a persisted `qwen.sync_image_models` list from before Wan 2.7 omits these model IDs. Alibaba documents Wan 2.7 synchronous image generation at `multimodal-generation/generation`. A regression test first reproduced the old endpoint, async header, and prompt-only body under that persisted-list fixture; the patch makes both exact Wan 2.7 image IDs use the documented synchronous protocol. The live gateway's actual setting and selected channel remain unverified, so this patch is a targeted candidate, not proof that issue #3522 is resolved.
+
+#### Data compatibility and rollback
+
+- No database, migration, log schema, API response, or billing change.
+- Existing `qwen.sync_image_models` data is preserved. Only `wan2.7-image` and `wan2.7-image-pro` bypass a stale list for image generation routing.
+- Revert the scoped commit to restore previous behavior; no data cleanup is needed. Do not promote before testing against a representative copy of the gateway configuration and performing real requests to both models.
+- Compare a future official upstream fix to this exact-model guard, then remove the local delta once the official behavior is verified.
+
+#### Verification
+
+- `go test ./relay/channel/ali -count=1` passed on the rc.33 candidate branch.
+- Real model generation through a candidate image has not yet been tested; production deployment has not occurred.
+
 
 ### PR 4810 - Ali wan2.7 and HappyHorse video support
 

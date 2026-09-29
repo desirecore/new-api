@@ -6,7 +6,8 @@
 - Candidate branch: `codex/release-rc33`.
 - Intended fork version: `v1.0.0-rc.33-desirecore.1`.
 - Production predecessor: `v1.0.0-rc.30-desirecore.2` at `f98e7b6b44d5a2f1bcd1932d5576fc6e5215bcc4`.
-- Only imported runtime delta: PR 4810 Alibaba compatibility commits `f6520a996` and `7d7cf46e7`, cherry-picked with provenance as `b7b3a10f5` and `3ba267dd3`. Plugin code and its original tests are identical to the production predecessor.
+- Imported runtime delta: PR 4810 Alibaba compatibility commits `f6520a996` and `7d7cf46e7`, cherry-picked with provenance as `b7b3a10f5` and `3ba267dd3`. Plugin code and its original tests are identical to the production predecessor.
+- Proposed additional candidate delta: exact-model Wan 2.7 image generation routing guard for stale persisted `qwen.sync_image_models`; see `docs/patches.md`. This has not been merged into the tested image or deployed.
 - Other fork changes: maintenance rules, patch register, this handoff, manual GHCR/Tencent publishing workflow, exclusions for fork tags in official publishing workflows, and a focused Qwen Claude regression test.
 - Official rc.33 is a prerelease and its release notes do not recommend production use. This candidate is for acceptance testing first.
 
@@ -18,6 +19,7 @@
 - In `relaykit/`, `GOWORK=off go test ./...` and `GOWORK=off go build ./...`: passed.
 - `TEST_MYSQL_DSN='<isolated MySQL DSN>' TEST_POSTGRES_DSN='<isolated PostgreSQL DSN>' go test ./model -count=1`: passed against local disposable MySQL 8.0.46 and PostgreSQL 15.18, plus embedded SQLite 3.50.4. Ports: 127.0.0.1:13316 and 127.0.0.1:15436; database: `newapi_test`. Test credentials are local fixtures, not production credentials.
 - Compared schema/model definitions, startup migration code, and Go dependencies with the production predecessor: no changes. Two model files change routing-name normalization only.
+- For the proposed Wan 2.7 image guard: `go test ./relay/channel/ali -count=1` passed on a branch based on this rc.33 candidate. Its regression test first failed under a simulated old persisted sync-model list, then passed with the scoped fix. This does not verify the live gateway setting or image generation.
 
 ## Operator Acceptance Required
 
@@ -29,5 +31,6 @@ Image publication is not deployment rehearsal. The following have NOT been perfo
 4. Verify Alibaba video creation, historical task polling, results, decimal durations, pre-consume, settlement and failure refunds. Check both JSON and multipart requests and current prices.
 5. Rehearse rollback against the upgraded test database and configuration. Do not assume an older image alone is sufficient; restoring a snapshot after new writes requires reconciliation.
 6. Record operator results, exact tested image digest and acceptance before production promotion. Keep production `deploy/main` and the existing release tags unchanged until acceptance.
+7. If the proposed Wan 2.7 image guard is included, inspect the candidate's effective Alibaba channel type, upstream model mapping, base URL and persisted `qwen.sync_image_models`. Then call `wan2.7-image` and `wan2.7-image-pro` through `/v1/images/generations` and verify actual image output. The same HTTP 400 can have other gateway configuration causes; the local regression test alone cannot close issue #3522.
 
 Publish candidate images under a `test-` tag prefix. Record the immutable build SHA and digest from the workflow run in the acceptance record; do not deploy an unverified rebuilt image under the same version.
