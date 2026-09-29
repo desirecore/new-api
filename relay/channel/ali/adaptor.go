@@ -62,6 +62,12 @@ var syncModels = []string{
 }
 
 func isSyncImageModel(modelName string) bool {
+	// Wan 2.7 generation uses the multimodal endpoint even when an older
+	// persisted sync_image_models setting has not gained these model IDs.
+	// https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference
+	if modelName == "wan2.7-image" || modelName == "wan2.7-image-pro" {
+		return true
+	}
 	return model_setting.IsSyncImageModel(modelName)
 }
 

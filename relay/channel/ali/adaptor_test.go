@@ -19,6 +19,7 @@ import (
 	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -167,6 +168,46 @@ func TestMappedAliImageModelUsesUpstreamProtocol(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, adaptor.IsSyncImageModel)
 	assert.IsType(t, &AliImageRequest{}, converted)
+}
+
+func TestWan27ImageGenerationUsesMultimodalEndpointAfterStoredSyncListUpgrade(t *testing.T) {
+	settings := model_setting.GetQwenSettings()
+	previous := settings.SyncImageModels
+	settings.SyncImageModels = []string{"z-image", "qwen-image", "wan2.6"}
+	t.Cleanup(func() { settings.SyncImageModels = previous })
+
+	for _, model := range []string{"wan2.7-image", "wan2.7-image-pro"} {
+		t.Run(model, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			info := &relaycommon.RelayInfo{
+				RelayMode: constant.RelayModeImagesGenerations,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelBaseUrl:    "https://dashscope.aliyuncs.com",
+					UpstreamModelName: model,
+				},
+			}
+			adaptor := &Adaptor{}
+			url, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			assert.Equal(t, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", url)
+
+			header := http.Header{}
+			require.NoError(t, adaptor.SetupRequestHeader(c, &header, info))
+			assert.Empty(t, header.Get("X-DashScope-Async"))
+
+			converted, err := adaptor.ConvertImageRequest(c, info, dto.ImageRequest{Model: model, Prompt: "portrait"})
+			require.NoError(t, err)
+			assert.True(t, adaptor.IsSyncImageModel)
+			request, ok := converted.(*AliImageRequest)
+			require.True(t, ok)
+			input, ok := request.Input.(AliImageInput)
+			require.True(t, ok)
+			require.Len(t, input.Messages, 1)
+			assert.Equal(t, "user", input.Messages[0].Role)
+			assert.Equal(t, []AliMediaContent{{Text: "portrait"}}, input.Messages[0].Content)
+		})
+	}
 }
 
 func TestAliImageHandlerHonorsRequestResponseFormat(t *testing.T) {
