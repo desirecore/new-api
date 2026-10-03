@@ -15,3 +15,4 @@ Rules:
 - If the task touches `web/`, also Read `web/AGENTS.md` before editing frontend files.
 - For temporary external PR work, read `docs/fork-maintenance.md` first and keep `docs/patches.md` current.
 - Keep imported `vendor/pr-<number>` branches unmodified; place local compatibility changes on separate branches.
+- If the task touches billing as defined under **Billing rules (mandatory read gate)** in `AGENTS.md`, also Read `.agents/rules/billing.md` in full before planning or editing. Tasks outside that definition may skip it.
