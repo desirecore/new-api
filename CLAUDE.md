@@ -15,3 +15,4 @@ Rules:
 - If the task touches `web/`, also Read `web/AGENTS.md` before editing frontend files.
 - For temporary external PR work, read `docs/fork-maintenance.md` first and keep `docs/patches.md` current.
 - Keep imported `vendor/pr-<number>` branches unmodified; place local compatibility changes on separate branches.
+- Before any release or upgrade, read the release baseline and incident rules in `docs/fork-maintenance.md`. Build from a selected official release tag, record exact provenance, and distinguish image publication from verified deployment.

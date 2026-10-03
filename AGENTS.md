@@ -56,6 +56,11 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 
 ### Fork Maintenance Rules
 
+- Release baseline is mandatory: create deployment candidates from an explicitly selected official release tag, not from moving upstream `main`. Import only reviewed, necessary fork patches and release configuration. Inspect both commit history and tree diff against that tag; do not merge patch branches that silently bring newer upstream history.
+- Fork version names MUST identify the actual official tag baseline. Record the upstream tag and peeled commit SHA, fork commit SHA, patch list, image digest, and verification results. Never label an upstream-main snapshot as a release-tag-based build.
+- A successful CI or Docker build proves build/publication only, not deployment rehearsal or production readiness. Validate upgrades on an isolated copy of the deployed database and exercise real client protocols, model mappings, task polling, and billing before claiming readiness. Report unperformed checks explicitly; never assume an older image can safely use an upgraded database without a tested rollback.
+- Read the release baseline and incident rules in `docs/fork-maintenance.md` before preparing any release or production upgrade. Release selection and verification are the agent's responsibility, not assumptions for the user to discover after deployment.
+
 - Keep `main` as the upstream-mirror branch. Only sync official upstream changes into `main`; do not merge temporary external PRs or deployment-only patches there.
 - Use `deploy/main` or another explicitly documented deployment branch for production releases that include urgent temporary patches ahead of upstream.
 - Preserve provenance for external PRs. Keep raw imported PR code on `vendor/pr-<number>` branches without local edits; put local compatibility fixes on `compat/pr-<number>` or normal feature branches.
