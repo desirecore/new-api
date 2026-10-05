@@ -1,6 +1,7 @@
 package oaichat
 
 import (
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -421,4 +422,16 @@ func TestNormalizeCacheCreationSplit(t *testing.T) {
 
 func ptr[T any](value T) *T {
 	return &value
+}
+
+func TestClaudeSignaturePresence(t *testing.T) {
+	for _, input := range []string{`{"type":"thinking","thinking":""}`, `{"type":"thinking","thinking":"","signature":""}`, `{"type":"thinking","thinking":"","signature":"opaque"}`} {
+		t.Run(input, func(t *testing.T) {
+			var block dto.ClaudeMediaMessage
+			require.NoError(t, kitutil.Unmarshal([]byte(input), &block))
+			output, err := kitutil.Marshal(block)
+			require.NoError(t, err)
+			assert.JSONEq(t, input, string(output))
+		})
+	}
 }

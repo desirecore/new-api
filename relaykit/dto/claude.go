@@ -25,7 +25,7 @@ type ClaudeMediaMessage struct {
 	Role         string               `json:"role,omitempty"`
 	Thinking     *string              `json:"thinking,omitempty"`
 	Data         string               `json:"data,omitempty"`
-	Signature    string               `json:"signature,omitempty"`
+	Signature    *string              `json:"signature,omitempty"`
 	Delta        string               `json:"delta,omitempty"`
 	CacheControl json.RawMessage      `json:"cache_control,omitempty"`
 
