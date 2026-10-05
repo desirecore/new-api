@@ -13,10 +13,22 @@ import (
 	sharedclaude "github.com/QuantumNous/new-api/relaykit/relayconvert/internal/shared/claude"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
 )
 
 func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	opts := convmeta.OptionsOf(info)
+	if opts.ReasoningReplay != nil {
+		if err := replay.ValidateRequest(&textRequest, *opts.ReasoningReplay); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, message := range textRequest.Messages {
+			if replay.HasExtension(message) {
+				return nil, &replay.Error{Code: replay.Invalid, Path: "newapi_reasoning"}
+			}
+		}
+	}
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
@@ -128,6 +140,11 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 		Role: "tool",
 	}
 	for _, message := range textRequest.Messages {
+		if message.NewAPIReasoning != nil {
+			formatMessages = append(formatMessages, message)
+			lastMessage = message
+			continue
+		}
 		switch message.Role {
 		case "":
 			message.Role = "user"
@@ -214,6 +231,15 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 
 		claudeMessage := dto.ClaudeMessage{
 			Role: message.Role,
+		}
+		if message.NewAPIReasoning != nil {
+			content, err := replay.Restore(message, *opts.ReasoningReplay)
+			if err != nil {
+				return nil, err
+			}
+			claudeMessage.Content = content
+			claudeMessages = append(claudeMessages, claudeMessage)
+			continue
 		}
 		if message.Role == "tool" {
 			if len(claudeMessages) > 0 && claudeMessages[len(claudeMessages)-1].Role == "user" {

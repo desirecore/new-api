@@ -7,8 +7,9 @@ import "github.com/QuantumNous/new-api/relaykit/types"
 // Meta (see relaycommon.RelayInfo.ConvOptions); relaykit users fill it
 // directly. Zero value = every adaptation disabled, no defaults applied.
 type Options struct {
-	Claude ClaudeOptions
-	Gemini GeminiOptions
+	ReasoningReplay *ReasoningReplayOptions
+	Claude          ClaudeOptions
+	Gemini          GeminiOptions
 
 	// ToolLossPolicy controls whether a cross-protocol conversion may omit or
 	// approximate built-in-tool semantics. The zero value uses the allow
@@ -106,4 +107,12 @@ func (o *Options) EffectiveToolLossPolicy() types.ConversionLossPolicy {
 		return types.ConversionLossPolicyAllow
 	}
 	return o.ToolLossPolicy
+}
+
+// ReasoningReplayOptions enables strict replay when non-nil. Zero limits use
+// defaults; custom limits may only lower them.
+type ReasoningReplayOptions struct {
+	MaxMessageBytes int
+	MaxRequestBytes int
+	MaxBlocks       int
 }

@@ -7,7 +7,11 @@ package kitutil
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math/big"
+	"reflect"
+	"strings"
 	"unsafe"
 )
 
@@ -132,4 +136,115 @@ func Any2Type[T any](data any) (T, error) {
 		return zero, err
 	}
 	return res, nil
+}
+
+// ExactJSONValue is the strict codec used for replay data. Unlike ordinary DTO
+// decoding it rejects duplicate keys and never rounds a JSON number to float64.
+func ExactJSONValue(data []byte) (any, error) {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	value, err := exactJSONToken(d, 0)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = d.Token(); err != io.EOF {
+		return nil, fmt.Errorf("invalid trailing JSON")
+	}
+	return value, nil
+}
+
+func exactJSONToken(d *json.Decoder, depth int) (any, error) {
+	if depth > 512 {
+		return nil, fmt.Errorf("JSON nesting limit")
+	}
+	token, err := d.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch v := token.(type) {
+	case json.Delim:
+		switch v {
+		case '{':
+			object := map[string]any{}
+			for d.More() {
+				keyToken, err := d.Token()
+				if err != nil {
+					return nil, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return nil, fmt.Errorf("invalid object key")
+				}
+				if _, exists := object[key]; exists {
+					return nil, fmt.Errorf("duplicate object key")
+				}
+				value, err := exactJSONToken(d, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				object[key] = value
+			}
+			end, err := d.Token()
+			if err != nil || end != json.Delim('}') {
+				return nil, fmt.Errorf("invalid object")
+			}
+			return object, nil
+		case '[':
+			array := make([]any, 0)
+			for d.More() {
+				value, err := exactJSONToken(d, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				array = append(array, value)
+			}
+			end, err := d.Token()
+			if err != nil || end != json.Delim(']') {
+				return nil, fmt.Errorf("invalid array")
+			}
+			return array, nil
+		}
+		return nil, fmt.Errorf("invalid delimiter")
+	case json.Number:
+		// Normalize decimal coefficient/exponent without allocating 10^exponent.
+		coefficient, exponent, found := strings.Cut(strings.ToLower(string(v)), "e")
+		var power big.Int
+		if found {
+			if _, ok := power.SetString(exponent, 10); !ok {
+				return nil, fmt.Errorf("invalid number")
+			}
+		}
+		negative := strings.HasPrefix(coefficient, "-")
+		coefficient = strings.TrimPrefix(coefficient, "-")
+		if whole, fraction, ok := strings.Cut(coefficient, "."); ok {
+			coefficient = whole + fraction
+			power.Sub(&power, big.NewInt(int64(len(fraction))))
+		}
+		coefficient = strings.TrimLeft(coefficient, "0")
+		if coefficient == "" {
+			return exactNumber{"0", "0"}, nil
+		}
+		trimmed := strings.TrimRight(coefficient, "0")
+		power.Add(&power, big.NewInt(int64(len(coefficient)-len(trimmed))))
+		if negative {
+			trimmed = "-" + trimmed
+		}
+		return exactNumber{trimmed, power.String()}, nil
+	default:
+		return token, nil
+	}
+}
+
+type exactNumber struct{ coefficient, exponent string }
+
+func JSONValuesEqual(a, b []byte) (bool, error) {
+	av, err := ExactJSONValue(a)
+	if err != nil {
+		return false, err
+	}
+	bv, err := ExactJSONValue(b)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(av, bv), nil
 }

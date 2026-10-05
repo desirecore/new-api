@@ -438,14 +438,16 @@ func (r *GeneralOpenAIRequest) ParseInput() []string {
 }
 
 type Message struct {
-	Role             string          `json:"role"`
-	Content          any             `json:"content"`
-	Name             *string         `json:"name,omitempty"`
-	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent *string         `json:"reasoning_content,omitempty"`
-	Reasoning        *string         `json:"reasoning,omitempty"`
-	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
-	ToolCallId       string          `json:"tool_call_id,omitempty"`
+	NewAPIReasoning  *ReasoningReplay `json:"newapi_reasoning,omitempty"`
+	RawReplayMessage json.RawMessage  `json:"-"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"`
+	Name             *string          `json:"name,omitempty"`
+	Prefix           *bool            `json:"prefix,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	Reasoning        *string          `json:"reasoning,omitempty"`
+	ToolCalls        json.RawMessage  `json:"tool_calls,omitempty"`
+	ToolCallId       string           `json:"tool_call_id,omitempty"`
 	// Tools carries Kimi K3 dynamic tool loading declarations on a system message.
 	// Same shape as the top-level tools array; passthrough-only for OpenAI-compatible upstreams.
 	Tools json.RawMessage `json:"tools,omitempty"`

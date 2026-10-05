@@ -502,6 +502,7 @@ type ClaudeErrorWithStatusCode struct {
 }
 
 type ClaudeResponse struct {
+	RawJSON      json.RawMessage      `json:"-"`
 	Id           string               `json:"id,omitempty"`
 	Type         string               `json:"type"`
 	Role         string               `json:"role,omitempty"`
