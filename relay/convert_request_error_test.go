@@ -15,7 +15,9 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -313,4 +315,101 @@ func TestImageHelperKeepsAdaptorClassifiedConvertError(t *testing.T) {
 	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
 	assert.True(t, types.IsSkipRetryError(apiErr), "other channels must not be asked to serve the same name")
 	assert.Contains(t, apiErr.Error(), "not served by the alibaba task plugin")
+}
+
+func TestReasoningReplayPreflight(t *testing.T) {
+	for _, tc := range []struct {
+		name, header string
+		channel      int
+		pass         bool
+		edit         bool
+		override     bool
+	}{
+		{name: "no negotiation", channel: constant.ChannelTypeAnthropic},
+		{name: "wrong version", header: "v2", channel: constant.ChannelTypeAnthropic},
+		{name: "native chat", header: "v1", channel: constant.ChannelTypeOpenAI},
+		{name: "passthrough", header: "v1", channel: constant.ChannelTypeAnthropic, pass: true},
+		{name: "edited history", header: "v1", channel: constant.ChannelTypeAnthropic, edit: true},
+		{name: "override history", header: "v1", channel: constant.ChannelTypeAnthropic, override: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+			defer upstream.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			c.Request.Header.Set(replay.Header, tc.header)
+			common.SetContextKey(c, constant.ContextKeyChannelType, tc.channel)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+			common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{PassThroughBodyEnabled: tc.pass})
+			if tc.override {
+				common.SetContextKey(c, constant.ContextKeyChannelParamOverride, map[string]any{"messages": []any{map[string]any{"role": "user", "content": "changed"}}})
+			}
+			message, err := replay.Project([]byte(`[{"type":"thinking","thinking":"sentinel-body","signature":"sentinel-signature"}]`), convmeta.ReasoningReplayOptions{})
+			require.NoError(t, err)
+			if tc.edit {
+				message.ReasoningContent = common.GetPointer("changed")
+			}
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeChatCompletions, OriginModelName: "claude", Request: &dto.GeneralOpenAIRequest{Model: "claude", MaxTokens: common.GetPointer(uint(20)), Messages: []dto.Message{message}}}
+			apiErr := PrepareRequestBilling(c, info)
+			require.NotNil(t, apiErr)
+			assert.Contains(t, apiErr.Error(), "reasoning_replay")
+			assert.NotContains(t, apiErr.Error(), "sentinel-body")
+			assert.NotContains(t, apiErr.Error(), "sentinel-signature")
+			assert.Zero(t, info.FinalPreConsumedQuota)
+			if apiErr == nil {
+				_ = TextHelper(c, info)
+			}
+			assert.Zero(t, calls)
+		})
+	}
+}
+
+func TestReasoningReplayDoesNotDoubleCount(t *testing.T) {
+	message, err := replay.Project([]byte(`[{"type":"thinking","thinking":"think","signature":"opaque"},{"type":"text","text":"answer"}]`), convmeta.ReasoningReplayOptions{})
+	require.NoError(t, err)
+	request := &dto.GeneralOpenAIRequest{Model: "claude", Messages: []dto.Message{message}}
+	with := request.GetTokenCountMeta()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{OriginModelName: "claude"}
+	withTokens, err := service.EstimateRequestToken(c, with, info)
+	require.NoError(t, err)
+	request.Messages[0].NewAPIReasoning = nil
+	without := request.GetTokenCountMeta()
+	withoutTokens, err := service.EstimateRequestToken(c, without, info)
+	require.NoError(t, err)
+	assert.Equal(t, without, with)
+	assert.Equal(t, withoutTokens, withTokens)
+}
+
+func TestReasoningReplayOutboundTransport(t *testing.T) {
+	var received []byte
+	var receivedHeader string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received, _ = io.ReadAll(r.Body)
+		receivedHeader = r.Header.Get(replay.Header)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"type":"rate_limit_error","message":"fixture"}}`)
+	}))
+	defer upstream.Close()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.Header.Set(replay.Header, "v1")
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAnthropic)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, map[string]any{replay.Header: "v1"})
+	original := `[{"type":"thinking","thinking":"","signature":"opaque"},{"type":"tool_use","id":"t","name":"f","input":{"n":9007199254740993}}]`
+	message, err := replay.Project([]byte(original), convmeta.ReasoningReplayOptions{})
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeChatCompletions, OriginModelName: "claude", Request: &dto.GeneralOpenAIRequest{Model: "claude", MaxTokens: common.GetPointer(uint(20)), Messages: []dto.Message{message}}}
+	require.NoError(t, service.ValidateReasoningReplayRequest(c, info))
+	apiErr := TextHelper(c, info)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 429, apiErr.StatusCode)
+	require.NotEmpty(t, received)
+	assert.Empty(t, receivedHeader)
+	assert.NotContains(t, string(received), "newapi_reasoning")
+	assert.Contains(t, string(received), "9007199254740993")
+	assert.JSONEq(t, original, gjson.GetBytes(received, "messages.1.content").Raw)
 }

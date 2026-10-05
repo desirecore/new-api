@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,4 +71,29 @@ func TestCountClaudeTokensRejectsMissingMessages(t *testing.T) {
 	assert.Equal(t, "error", response.Type)
 	assert.Equal(t, "invalid_request_error", response.Error.Type)
 	assert.Contains(t, response.Error.Message, "messages")
+}
+
+func TestReasoningReplayRawEntryRejectsBeforeRelay(t *testing.T) {
+	for _, tc := range []struct {
+		header, body string
+		status       int
+	}{
+		{body: `{"model":"claude","messages":[{"role":"assistant","content":null,"newapi_reasoning":null}]}`, status: 400},
+		{header: "v2", body: `{"model":"claude","messages":[]}`, status: 400},
+		{header: "v1", body: `{"model":"claude","messages":[{"role":"assistant","content":null,"newapi_reasoning":{"version":1,"version":1,"source":"anthropic_messages","content":[]}}]}`, status: 400},
+		{header: "v1", body: `{"model":"claude","messages":[{"role":"assistant","content":null,"newapi_reasoning":{"version":1,"source":"anthropic_messages","content":[{"type":"thinking","thinking":"secret-body","signature":"secret-signature","unknown":true}]}}]}`, status: 400},
+	} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.body))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		ctx.Request.Header.Set("X-New-Api-Reasoning-Transport", tc.header)
+		// No database, billing session or channel fixture exists: malformed transport
+		// must return before the ordinary relay lifecycle touches any of them.
+		Relay(ctx, types.RelayFormatOpenAI)
+		assert.Equal(t, tc.status, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "invalid_reasoning_replay")
+		assert.NotContains(t, recorder.Body.String(), "secret-body")
+		assert.NotContains(t, recorder.Body.String(), "secret-signature")
+	}
 }

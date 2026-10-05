@@ -24,6 +24,9 @@ import (
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	if err := service.ValidateReasoningReplayRequest(c, info); err != nil {
+		return service.ReasoningReplayError(err)
+	}
 
 	textReq, ok := info.Request.(*dto.GeneralOpenAIRequest)
 	if !ok {
@@ -138,7 +141,13 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 
-		logger.LogDebug(c, "text request body: %s", jsonData)
+		if info.ReasoningReplayEnabled {
+			if err := service.ValidateReasoningReplayOutbound(convertedRequest, jsonData); err != nil {
+				return service.ReasoningReplayError(err)
+			}
+		} else {
+			logger.LogDebug(c, "text request body: %s", jsonData)
+		}
 
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -170,6 +179,12 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
 	if newApiErr != nil {
+		if info.ReasoningReplayEnabled {
+			if observed, ok := usage.(*dto.Usage); ok && observed != nil && observed.BillingUsage != nil {
+				service.PostTextConsumeQuota(c, info, observed, []string{"reasoning replay conversion failed"})
+			}
+			return newApiErr
+		}
 		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return newApiErr

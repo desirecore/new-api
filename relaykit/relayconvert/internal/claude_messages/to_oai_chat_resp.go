@@ -584,6 +584,7 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 
 		claudeInfo.Done = true
 	} else if claudeResponse.Type == "content_block_start" {
+	} else if oaiResponse != nil && len(oaiResponse.Choices) > 0 && (oaiResponse.Choices[0].Delta.NewAPIReasoning != nil || len(oaiResponse.Choices[0].Delta.ToolCalls) > 0) {
 	} else {
 		return false
 	}

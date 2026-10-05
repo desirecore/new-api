@@ -90,6 +90,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			if c.GetHeader("X-New-Api-Reasoning-Transport") == "v1" && c.Writer.Written() {
+				_ = helper.ObjectData(c, gin.H{"error": newAPIError.ToOpenAIError()})
+				return
+			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -107,6 +111,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
+	if err := service.ValidateReasoningReplayBody(c, relayFormat); err != nil {
+		newAPIError = service.ReasoningReplayError(err)
+		return
+	}
 	request, err := helper.GetAndValidateRequest(c, relayFormat)
 	if err != nil {
 		// Map "request body too large" to 413 so clients can handle it correctly
@@ -166,6 +174,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
+		if relayInfo.ReasoningReplayEnabled {
+			if err := service.ValidateReasoningReplayRequest(c, relayInfo); err != nil {
+				newAPIError = service.ReasoningReplayError(err)
+				break
+			}
+		}
 		service.AppendUsedChannel(c, channel.Id)
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr
@@ -224,6 +238,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 // It deliberately skips upstream generation and billing; callers use this
 // endpoint to size prompts before creating a Message.
 func CountClaudeTokens(c *gin.Context) {
+	if err := service.ValidateReasoningReplayBody(c, types.RelayFormatClaude); err != nil {
+		apiErr := service.ReasoningReplayError(err)
+		c.JSON(apiErr.StatusCode, gin.H{"type": "error", "error": apiErr.ToClaudeError()})
+		return
+	}
 	request, err := helper.GetAndValidateClaudeRequest(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -260,7 +279,7 @@ var upgrader = websocket.Upgrader{
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
+	if info.ChannelMeta == nil || info.ReasoningReplayEnabled {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {

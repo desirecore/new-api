@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -89,6 +90,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	var claudeResponse dto.ClaudeResponse
 	err := common.UnmarshalJsonStr(data, &claudeResponse)
 	if err != nil {
+		if info.ReasoningReplayEnabled {
+			return service.ReasoningReplayError(&replay.Error{Code: replay.Unrepresentable, Path: "stream"})
+		}
 		common.SysLog("error unmarshalling stream response: " + err.Error())
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -104,7 +108,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
 		maybeMarkClaudeRefusal(c, info, *claudeResponse.Delta.StopReason)
 	}
-	if claudeResponse.Type == "message_stop" {
+	if claudeResponse.Type == "message_stop" && !info.ReasoningReplayEnabled {
 		info.StreamStatus.MarkCompleted()
 	}
 	if info.RelayFormat == types.RelayFormatClaude {
@@ -131,7 +135,14 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		response, err := state.ConvertChunk(&claudeResponse)
 		if err != nil {
+			if info.ReasoningReplayEnabled {
+				FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
+				return service.ReasoningReplayError(err)
+			}
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		if info.ReasoningReplayEnabled && claudeResponse.Type == "message_stop" {
+			info.StreamStatus.MarkCompleted()
 		}
 
 		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
@@ -142,6 +153,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 		if response == nil {
 			return nil
+		}
+		if info.ReasoningReplayEnabled {
+			c.Header(replay.Header, "v1")
 		}
 		err = helper.ObjectData(c, response)
 		if err != nil {
@@ -176,7 +190,7 @@ func claudeToChatStreamState(info *relaycommon.RelayInfo) (*relayconvert.ClaudeT
 		return state, nil
 	}
 
-	state := relayconvert.NewClaudeToChatStreamState()
+	state := relayconvert.NewClaudeToChatStreamStateWithOptions(info.ConvOptions().ReasoningReplay)
 	if info != nil {
 		info.ClaudeToChatStreamState = state
 	}
@@ -239,6 +253,12 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	if info.ReasoningReplayEnabled {
+		state, err := claudeToChatStreamState(info)
+		if err != nil || state.Finalize() != nil {
+			return
+		}
+	}
 	if claudeInfo.Usage.PromptTokens == 0 {
 		//上游出错
 	}
@@ -307,6 +327,20 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		}
 	})
 	info.StreamStatus.RequireTerminal()
+	if info.ReasoningReplayEnabled {
+		if err == nil {
+			state, stateErr := claudeToChatStreamState(info)
+			if stateErr != nil {
+				err = service.ReasoningReplayError(&replay.Error{Code: replay.Unrepresentable, Path: "stream"})
+			} else if finalErr := state.Finalize(); finalErr != nil {
+				err = service.ReasoningReplayError(finalErr)
+			}
+		}
+		if err != nil {
+			relayconvert.FinalizeClaudeStreamBillingUsage(claudeInfo)
+			return claudeInfo.Usage, err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +353,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	var claudeResponse dto.ClaudeResponse
 	err := common.Unmarshal(data, &claudeResponse)
 	if err != nil {
+		if info.ReasoningReplayEnabled {
+			return service.ReasoningReplayError(&replay.Error{Code: replay.Unrepresentable, Path: "response"})
+		}
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
@@ -346,7 +383,10 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
-		openaiResponse := ResponseClaude2OpenAI(&claudeResponse)
+		openaiResponse, err := relayconvert.ResponseClaude2OpenAIWithOptions(&claudeResponse, info.ConvOptions().ReasoningReplay)
+		if err != nil {
+			return service.ReasoningReplayError(err)
+		}
 		openaiResponse.Usage = buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage)
 		responseData, err = common.Marshal(openaiResponse)
 		if err != nil {
@@ -397,6 +437,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 
+	if info.ReasoningReplayEnabled {
+		c.Header(replay.Header, "v1")
+	}
 	service.IOCopyBytesGracefully(c, httpResp, responseData)
 	return nil
 }
@@ -415,9 +458,14 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	logger.LogDebug(c, "responseBody: %s", responseBody)
+	if !info.ReasoningReplayEnabled {
+		logger.LogDebug(c, "responseBody: %s", responseBody)
+	}
 	handleErr := HandleClaudeResponseData(c, info, claudeInfo, resp, responseBody)
 	if handleErr != nil {
+		if info.ReasoningReplayEnabled {
+			return claudeInfo.Usage, handleErr
+		}
 		return nil, handleErr
 	}
 	return claudeInfo.Usage, nil

@@ -1,15 +1,21 @@
 package claude
 
 import (
+	"fmt"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -399,4 +405,63 @@ func TestOpenAIChatRequestToClaudeMessages_ClaudeOpus48ThinkingUsesAdaptiveHighE
 	require.Nil(t, claudeRequest.Temperature)
 	require.Nil(t, claudeRequest.TopP)
 	require.Nil(t, claudeRequest.TopK)
+}
+
+func TestClaudeReasoningReplayHTTP(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	for _, stream := range []bool{false, true} {
+		for _, complete := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stream=%v/complete=%v", stream, complete), func(t *testing.T) {
+				data := `{"id":"m","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"","signature":"opaque"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}`
+				if !complete {
+					data = strings.Replace(data, `"signature":"opaque"`, `"signature":"opaque","unknown":"sentinel"`, 1)
+				}
+				if stream {
+					data = "data: " + `{"type":"message_start","message":{"id":"m","model":"claude","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}` + "\n\n" +
+						"data: " + `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}` + "\n\n" +
+						"data: " + `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque"}}` + "\n\n" +
+						"data: " + `{"type":"content_block_stop","index":0}` + "\n\n" +
+						"data: " + `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}` + "\n\n"
+					if complete {
+						data += "data: " + `{"type":"message_stop"}` + "\n\n"
+					}
+				}
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+					}
+					_, _ = io.WriteString(w, data)
+				}))
+				defer upstream.Close()
+				response, err := http.Get(upstream.URL)
+				require.NoError(t, err)
+				defer response.Body.Close()
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+				info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ReasoningReplayEnabled: true, IsStream: stream, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude"}, StreamStatus: relaycommon.NewStreamStatus()}
+				var usage *dto.Usage
+				var apiErr *types.NewAPIError
+				if stream {
+					usage, apiErr = ClaudeStreamHandler(c, response, info)
+				} else {
+					usage, apiErr = ClaudeHandler(c, response, info)
+				}
+				if complete {
+					require.Nil(t, apiErr)
+					require.NotNil(t, usage)
+					assert.Contains(t, recorder.Body.String(), `"newapi_reasoning"`)
+					assert.Contains(t, recorder.Body.String(), `"signature":"opaque"`)
+					assert.Equal(t, "v1", recorder.Header().Get(replay.Header))
+				} else {
+					require.NotNil(t, apiErr)
+					assert.NotContains(t, recorder.Body.String(), `"finish_reason":"stop"`)
+					assert.NotContains(t, recorder.Body.String(), "[DONE]")
+					assert.NotContains(t, apiErr.Error(), "sentinel")
+				}
+			})
+		}
+	}
 }
