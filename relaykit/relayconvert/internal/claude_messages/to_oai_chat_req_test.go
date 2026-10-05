@@ -149,3 +149,43 @@ func TestClaudeMessagesRequestToOpenAIChatKeepsParallelToolResultsContiguous(t *
 	require.NotNil(t, parts[0].GetImageMedia())
 	assert.Equal(t, dataURL, parts[0].GetImageMedia().Url)
 }
+
+func TestThinkingProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name, role string
+		thoughts   []string
+		want       *string
+		wantText   string
+		tool       bool
+	}{
+		{"multiple", "assistant", []string{"first", "second"}, lo.ToPtr("firstsecond"), "visible", true},
+		{"empty", "assistant", []string{""}, lo.ToPtr(""), "", false},
+		{"not assistant", "user", []string{"hidden"}, nil, "visible", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks := []dto.ClaudeMediaMessage{}
+			for _, thought := range tc.thoughts {
+				blocks = append(blocks, dto.ClaudeMediaMessage{Type: "thinking", Thinking: lo.ToPtr(thought)})
+			}
+			blocks = append(blocks, dto.ClaudeMediaMessage{Type: "redacted_thinking", Data: "opaque"})
+			if tc.wantText != "" {
+				blocks = append(blocks, dto.ClaudeMediaMessage{Type: "text", Text: lo.ToPtr(tc.wantText)})
+			}
+			if tc.tool {
+				blocks = append(blocks, dto.ClaudeMediaMessage{Type: "tool_use", Id: "tool1", Name: "lookup", Input: map[string]any{"city": "Hangzhou"}})
+			}
+			req, err := ClaudeMessagesRequestToOpenAIChat(context.Background(), dto.ClaudeRequest{Model: "test", Messages: []dto.ClaudeMessage{{Role: tc.role, Content: blocks}}}, &convmeta.Values{})
+			require.NoError(t, err)
+			require.Len(t, req.Messages, 1)
+			assert.Equal(t, tc.want, req.Messages[0].ReasoningContent)
+			var text string
+			for _, part := range req.Messages[0].ParseContent() {
+				text += part.Text
+			}
+			assert.Equal(t, tc.wantText, text)
+			if tc.tool {
+				assert.NotEmpty(t, req.Messages[0].ToolCalls)
+			}
+		})
+	}
+}

@@ -737,3 +737,30 @@ func TestConvertChatResponseToResponsesRestoresRecordedCustomTools(t *testing.T)
 	require.NotNil(t, added)
 	assert.Equal(t, "custom_tool_call", added.Payload.Item.Type)
 }
+
+func TestThinkingProjectionResponse(t *testing.T) {
+	for _, thoughts := range [][]string{{"first", "second"}, {""}} {
+		blocks := []dto.ClaudeMediaMessage{}
+		want := ""
+		for _, thought := range thoughts {
+			text := thought
+			blocks = append(blocks, dto.ClaudeMediaMessage{Type: "thinking", Thinking: &text})
+			want += thought
+		}
+		blocks = append(blocks, dto.ClaudeMediaMessage{Type: "redacted_thinking", Data: "opaque"})
+		response := ResponseClaude2OpenAI(&dto.ClaudeResponse{Content: blocks})
+		require.Len(t, response.Choices, 1)
+		require.NotNil(t, response.Choices[0].Message.ReasoningContent)
+		assert.Equal(t, want, *response.Choices[0].Message.ReasoningContent)
+	}
+}
+
+func TestSignatureDeltaDoesNotCreateText(t *testing.T) {
+	response := StreamResponseClaude2OpenAI(&dto.ClaudeResponse{Type: "content_block_delta", Delta: &dto.ClaudeMediaMessage{Type: "signature_delta"}})
+	if response != nil {
+		for _, choice := range response.Choices {
+			assert.Nil(t, choice.Delta.ReasoningContent)
+			assert.Nil(t, choice.Delta.Content)
+		}
+	}
+}

@@ -85,8 +85,7 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 					},
 				})
 			case "signature_delta":
-				signatureContent := "\n"
-				choice.Delta.ReasoningContent = &signatureContent
+				return nil
 			case "thinking_delta":
 				choice.Delta.ReasoningContent = claudeResponse.Delta.Thinking
 			case "citations_delta":
@@ -231,7 +230,8 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		}
 	}
 	tools := make([]dto.ToolCallResponse, 0)
-	thinkingContent := ""
+	var thinkingContent strings.Builder
+	hasThinking := false
 	annotations := make([]any, 0)
 
 	fullTextResponse.Id = claudeResponse.Id
@@ -249,7 +249,8 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 			})
 		case "thinking":
 			if message.Thinking != nil {
-				thinkingContent = *message.Thinking
+				hasThinking = true
+				thinkingContent.WriteString(*message.Thinking)
 			}
 		case "text":
 			text := message.GetText()
@@ -279,8 +280,9 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 	if len(tools) > 0 {
 		choice.Message.SetToolCalls(tools)
 	}
-	if thinkingContent != "" {
-		choice.Message.ReasoningContent = &thinkingContent
+	if hasThinking {
+		text := thinkingContent.String()
+		choice.Message.ReasoningContent = &text
 	}
 	fullTextResponse.Model = claudeResponse.Model
 	choices = append(choices, choice)
