@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -384,16 +385,32 @@ func TestReasoningReplayDoesNotDoubleCount(t *testing.T) {
 }
 
 func TestReasoningReplayOutboundTransport(t *testing.T) {
+	var logs bytes.Buffer
+	common.LogWriterMu.Lock()
+	oldWriter, oldErrorWriter := gin.DefaultWriter, gin.DefaultErrorWriter
+	gin.DefaultWriter = &logs
+	gin.DefaultErrorWriter = &logs
+	common.LogWriterMu.Unlock()
+	oldDebug := common.DebugEnabled
+	common.DebugEnabled = true
+	t.Cleanup(func() {
+		common.DebugEnabled = oldDebug
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = oldWriter
+		gin.DefaultErrorWriter = oldErrorWriter
+		common.LogWriterMu.Unlock()
+	})
 	var received []byte
 	var receivedHeader string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received, _ = io.ReadAll(r.Body)
 		receivedHeader = r.Header.Get(replay.Header)
 		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = io.WriteString(w, `{"error":{"type":"rate_limit_error","message":"fixture"}}`)
+		_, _ = io.WriteString(w, `{"error":{"type":"rate_limit_error","message":"sentinel-secret"}}`)
 	}))
 	defer upstream.Close()
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	c.Request.Header.Set(replay.Header, "v1")
 	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAnthropic)
@@ -402,11 +419,15 @@ func TestReasoningReplayOutboundTransport(t *testing.T) {
 	original := `[{"type":"thinking","thinking":"","signature":"opaque"},{"type":"tool_use","id":"t","name":"f","input":{"n":9007199254740993}}]`
 	message, err := replay.Project([]byte(original), convmeta.ReasoningReplayOptions{})
 	require.NoError(t, err)
-	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeChatCompletions, OriginModelName: "claude", Request: &dto.GeneralOpenAIRequest{Model: "claude", MaxTokens: common.GetPointer(uint(20)), Messages: []dto.Message{message}}}
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeChatCompletions, IsStream: true, OriginModelName: "claude", Request: &dto.GeneralOpenAIRequest{Model: "claude", MaxTokens: common.GetPointer(uint(20)), Messages: []dto.Message{message}}}
 	require.NoError(t, service.ValidateReasoningReplayRequest(c, info))
 	apiErr := TextHelper(c, info)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 429, apiErr.StatusCode)
+	assert.NotContains(t, apiErr.Error(), "sentinel-secret")
+	assert.NotContains(t, logs.String(), "sentinel-secret")
+	assert.NotContains(t, logs.String(), "opaque")
+	assert.Equal(t, "v1", recorder.Header().Get(replay.Header))
 	require.NotEmpty(t, received)
 	assert.Empty(t, receivedHeader)
 	assert.NotContains(t, string(received), "newapi_reasoning")

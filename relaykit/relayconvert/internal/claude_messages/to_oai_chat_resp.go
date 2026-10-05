@@ -626,12 +626,13 @@ func ResponseClaude2OpenAIWithOptions(response *dto.ClaudeResponse, options *con
 }
 
 type replayStreamBlock struct {
-	fields       map[string]json.RawMessage
-	kind         string
-	stopped      bool
-	toolIndex    int
-	arguments    *strings.Builder
-	hasArguments bool
+	fields           map[string]json.RawMessage
+	kind             string
+	stopped          bool
+	toolIndex        int
+	arguments        *strings.Builder
+	hasArguments     bool
+	signatureStarted bool
 }
 
 func (s *ClaudeToChatStreamState) Finalize() error {
@@ -704,6 +705,15 @@ func (s *ClaudeToChatStreamState) convertReplayChunk(event *dto.ClaudeResponse) 
 		if len(s.replayBlocks) >= limits.MaxBlocks {
 			return nil, invalid
 		}
+		// Text and thinking are each concatenated into one Chat field. A later
+		// block of the same kind cannot start while an earlier one can still grow.
+		// Tool arguments have independent indexed fields and may interleave.
+		for i := range s.replayBlocks {
+			previous := &s.replayBlocks[i]
+			if !previous.stopped && previous.kind == event.ContentBlock.Type && (previous.kind == "text" || previous.kind == "thinking") {
+				return nil, invalid
+			}
+		}
 		blockRaw := fields["content_block"]
 		projected, err := replay.Project(append(append([]byte("["), blockRaw...), ']'), limits)
 		if err != nil {
@@ -714,6 +724,9 @@ func (s *ClaudeToChatStreamState) convertReplayChunk(event *dto.ClaudeResponse) 
 			return nil, invalid
 		}
 		block := replayStreamBlock{fields: blockFields, kind: event.ContentBlock.Type, toolIndex: -1}
+		if signature := event.ContentBlock.Signature; signature != nil && *signature != "" {
+			block.signatureStarted = true
+		}
 		s.replayBytes += len(blockRaw) + 1
 		choice.Delta.ReasoningContent = projected.ReasoningContent
 		if text, ok := projected.Content.(string); ok {
@@ -750,7 +763,7 @@ func (s *ClaudeToChatStreamState) convertReplayChunk(event *dto.ClaudeResponse) 
 			}
 			key = "text"
 		case "thinking_delta":
-			if block.kind != "thinking" {
+			if block.kind != "thinking" || block.signatureStarted {
 				return nil, invalid
 			}
 			key = "thinking"
@@ -759,6 +772,7 @@ func (s *ClaudeToChatStreamState) convertReplayChunk(event *dto.ClaudeResponse) 
 				return nil, invalid
 			}
 			key = "signature"
+			block.signatureStarted = true
 		case "input_json_delta":
 			if block.kind != "tool_use" {
 				return nil, invalid

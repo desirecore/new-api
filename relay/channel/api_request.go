@@ -519,6 +519,9 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	req.Header.Del("X-New-Api-Reasoning-Transport")
+	if info.ReasoningReplayEnabled && info.IsStream {
+		c.Header("X-New-Api-Reasoning-Transport", "v1")
+	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)

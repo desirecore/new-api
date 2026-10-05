@@ -97,6 +97,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+		if info.ReasoningReplayEnabled {
+			return service.ReasoningReplayUpstreamError(http.StatusBadGateway)
+		}
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
 	if claudeResponse.Type == "message_start" && claudeResponse.Message != nil {
@@ -132,6 +135,14 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		state, err := claudeToChatStreamState(info)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		if info.ReasoningReplayEnabled && claudeResponse.Type == "content_block_start" && claudeResponse.ContentBlock != nil {
+			if text := claudeResponse.ContentBlock.Text; text != nil {
+				claudeInfo.ResponseText.WriteString(*text)
+			}
+			if thinking := claudeResponse.ContentBlock.Thinking; thinking != nil {
+				claudeInfo.ResponseText.WriteString(*thinking)
+			}
 		}
 		response, err := state.ConvertChunk(&claudeResponse)
 		if err != nil {
@@ -252,13 +263,7 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 	}
 }
 
-func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if info.ReasoningReplayEnabled {
-		state, err := claudeToChatStreamState(info)
-		if err != nil || state.Finalize() != nil {
-			return
-		}
-	}
+func finalizeClaudeStreamUsage(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
 	if claudeInfo.Usage.PromptTokens == 0 {
 		//上游出错
 	}
@@ -281,6 +286,17 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		claudeInfo.Usage.UsageSemantic = "anthropic"
 	}
 	relayconvert.FinalizeClaudeStreamBillingUsage(claudeInfo)
+
+}
+
+func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	finalizeClaudeStreamUsage(c, info, claudeInfo)
+	if info.ReasoningReplayEnabled {
+		state, err := claudeToChatStreamState(info)
+		if err != nil || state.Finalize() != nil {
+			return
+		}
+	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
@@ -337,7 +353,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 			}
 		}
 		if err != nil {
-			relayconvert.FinalizeClaudeStreamBillingUsage(claudeInfo)
+			finalizeClaudeStreamUsage(c, info, claudeInfo)
 			return claudeInfo.Usage, err
 		}
 	}
@@ -359,6 +375,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+		if info.ReasoningReplayEnabled {
+			return service.ReasoningReplayUpstreamError(http.StatusBadGateway)
+		}
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
 	info.ObserveResponseModel(claudeResponse.Model)

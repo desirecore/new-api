@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -312,4 +315,116 @@ func TestReasoningReplayRegistryTerminal(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ConvertStreamResponseChunk(nil, info, state, &dto.ClaudeResponse{Type: "message_stop"})
 	require.Error(t, err)
+}
+
+// Run with REASONING_REPLAY_NODE to verify the contract with a real JS runtime.
+func TestReasoningReplayJavaScriptPersistence(t *testing.T) {
+	node := os.Getenv("REASONING_REPLAY_NODE")
+	if node == "" {
+		t.Skip("set REASONING_REPLAY_NODE for cross-language persistence")
+	}
+	var upstream dto.ClaudeResponse
+	require.NoError(t, kitutil.Unmarshal([]byte(`{"type":"message","role":"assistant","stop_reason":"end_turn","content":`+replayFixture+`}`), &upstream))
+	response, err := ResponseClaude2OpenAIWithOptions(&upstream, &convmeta.ReasoningReplayOptions{})
+	require.NoError(t, err)
+	state := NewClaudeToChatStreamStateWithOptions(&convmeta.ReasoningReplayOptions{})
+	events := []string{`{"type":"message_start","message":{"content":[]}}`}
+	var blocks []json.RawMessage
+	require.NoError(t, kitutil.Unmarshal([]byte(replayFixture), &blocks))
+	for i, block := range blocks {
+		events = append(events, fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":%s}`, i, block), fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, i))
+	}
+	events = append(events, `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`, `{"type":"message_stop"}`)
+	var sse strings.Builder
+	for _, event := range events {
+		var r dto.ClaudeResponse
+		require.NoError(t, kitutil.Unmarshal([]byte(event), &r))
+		chunk, err := state.ConvertChunk(&r)
+		require.NoError(t, err)
+		if chunk == nil {
+			continue
+		}
+		raw, err := kitutil.Marshal(chunk)
+		require.NoError(t, err)
+		fmt.Fprintf(&sse, "data: %s\n\n", raw)
+	}
+	sse.WriteString("data: [DONE]\n\n")
+	input, err := kitutil.Marshal(map[string]any{"http": response.Choices[0].Message, "sse": sse.String(), "confirmation": "v1"})
+	require.NoError(t, err)
+	const script = `
+const fs = require('node:fs');
+const raw = fs.readFileSync(0, 'utf8');
+const parse = raw => JSON.parse(raw, (key, value, context) => typeof value === 'number' ? JSON.rawJSON(context.source) : value);
+const input = parse(raw);
+if (JSON.stringify(JSON.parse(raw).http.newapi_reasoning.content).includes('9007199254740993')) throw Error('fixture must expose ordinary JSON.parse precision loss');
+const accepts = header => header === 'v1';
+if (accepts(undefined) || accepts('v2') || !accepts(input.confirmation)) throw Error('unconfirmed transport');
+const messages = new Map();
+for (const event of input.sse.split('\n\n')) {
+ if (!event.startsWith('data: ') || event === 'data: [DONE]') continue;
+ const chunk = parse(event.slice(6));
+ for (const choice of chunk.choices) {
+  const index = Number(choice.index.rawJSON);
+  const message = messages.get(index) || {role:'assistant',content:null};
+  const delta = choice.delta;
+  if (delta.content !== undefined) message.content = (message.content ?? '') + delta.content;
+  if (delta.reasoning_content !== undefined) message.reasoning_content = (message.reasoning_content ?? '') + delta.reasoning_content;
+  if (delta.tool_calls) for (const call of delta.tool_calls) {
+   const index = Number(call.index.rawJSON);
+   message.tool_calls ??= [];
+   const tool = message.tool_calls[index] ??= {id:'',type:'function',function:{name:'',arguments:''}};
+   if (call.id) tool.id = call.id;
+   if (call.function.name) tool.function.name = call.function.name;
+   tool.function.arguments += call.function.arguments ?? '';
+  }
+  if (delta.newapi_reasoning !== undefined) message.newapi_reasoning = delta.newapi_reasoning;
+  // Apply the entire delta before finish_reason from the same chunk.
+  if (choice.finish_reason && !message.newapi_reasoning) throw Error('finished without snapshot');
+  messages.set(index,message);
+ }
+}
+function reorder(value) {
+ if (value === null || typeof value !== 'object' || JSON.isRawJSON(value)) return value;
+ if (Array.isArray(value)) return value.map(reorder);
+ return Object.fromEntries(Object.keys(value).reverse().map(key=>[key,reorder(value[key])]));
+}
+fs.writeFileSync(process.argv[1], JSON.stringify(reorder([input.http,...messages.values()])));
+process.stdout.write(JSON.stringify(parse(fs.readFileSync(process.argv[1], 'utf8'))));
+`
+	command := exec.Command(node, "-e", script, filepath.Join(t.TempDir(), "history.json"))
+	command.Stdin = strings.NewReader(string(input))
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, string(output))
+	var messages []dto.Message
+	require.NoError(t, kitutil.Unmarshal(output, &messages))
+	require.Len(t, messages, 2)
+	for _, message := range messages {
+		restored, err := replay.Restore(message, convmeta.ReasoningReplayOptions{})
+		require.NoError(t, err)
+		equal, err := kitutil.JSONValuesEqual(restored, []byte(replayFixture))
+		require.NoError(t, err)
+		assert.True(t, equal)
+		assert.Contains(t, string(restored), "9007199254740993")
+	}
+}
+
+func TestReasoningReplayRejectsReorderedProjection(t *testing.T) {
+	for _, events := range [][]string{
+		{`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`, `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"B"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}`},
+		{`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"late"}}`},
+	} {
+		state := NewClaudeToChatStreamStateWithOptions(&convmeta.ReasoningReplayOptions{})
+		_, err := state.ConvertChunk(&dto.ClaudeResponse{Type: "message_start", Message: &dto.ClaudeMediaMessage{}})
+		require.NoError(t, err)
+		for _, event := range events {
+			var r dto.ClaudeResponse
+			require.NoError(t, kitutil.Unmarshal([]byte(event), &r))
+			_, err = state.ConvertChunk(&r)
+			if err != nil {
+				break
+			}
+		}
+		require.Error(t, err)
+		require.Error(t, state.Finalize())
+	}
 }

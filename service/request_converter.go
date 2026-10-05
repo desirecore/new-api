@@ -213,6 +213,9 @@ func ValidateReasoningReplayOutbound(expected any, raw []byte) error {
 // ReasoningReplayError maps sanitized transport errors without retaining raw data.
 func ReasoningReplayError(err error) *types.NewAPIError {
 	var replayErr *replay.Error
+	if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
+		err = &replay.Error{Code: replay.TooLarge, Path: "request"}
+	}
 	if !errors.As(err, &replayErr) {
 		replayErr = &replay.Error{Code: replay.Invalid, Path: "request"}
 	}
@@ -224,4 +227,10 @@ func ReasoningReplayError(err error) *types.NewAPIError {
 		status = http.StatusBadGateway
 	}
 	return types.NewErrorWithStatusCode(replayErr, types.ErrorCode(replayErr.Code), status, types.ErrOptionWithSkipRetry())
+}
+
+// Upstream failures can echo prompts or signatures. Preserve the HTTP status,
+// but never parse or log their body on the private replay transport.
+func ReasoningReplayUpstreamError(status int) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(errors.New("upstream request failed"), types.ErrorCodeBadResponseStatusCode, status, types.ErrOptionWithSkipRetry())
 }

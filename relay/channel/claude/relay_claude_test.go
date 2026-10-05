@@ -465,3 +465,46 @@ func TestClaudeReasoningReplayHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeReasoningReplayMasksUpstreamErrors(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, source := range []string{`{"type":"error","error":{"type":"invalid_request_error","message":"bad signature: sentinel-secret"}}`, `{"type":sentinel-secret}`} {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ReasoningReplayEnabled: true, ChannelMeta: &relaycommon.ChannelMeta{}, StreamStatus: relaycommon.NewStreamStatus()}
+			details := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+			var err *types.NewAPIError
+			if stream {
+				err = HandleStreamResponseData(c, info, details, source)
+			} else {
+				err = HandleClaudeResponseData(c, info, details, &http.Response{}, []byte(source))
+			}
+			require.NotNil(t, err)
+			assert.NotContains(t, err.Error(), "sentinel-secret")
+			encoded, marshalErr := common.Marshal(err.ToOpenAIError())
+			require.NoError(t, marshalErr)
+			assert.NotContains(t, string(encoded), "sentinel-secret")
+		}
+	}
+}
+
+func TestClaudeReasoningReplayInterruptedUsage(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	body := "data: " + `{"type":"message_start","message":{"content":[],"usage":{"input_tokens":3,"output_tokens":0}}}` + "\n\n" +
+		"data: " + `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"data: " + `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world, this answer was interrupted."}}` + "\n\n"
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ReasoningReplayEnabled: true, IsStream: true, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude"}}
+	usage, apiErr := ClaudeStreamHandler(c, &http.Response{Body: io.NopCloser(strings.NewReader(body))}, info)
+	require.NotNil(t, apiErr)
+	require.NotNil(t, usage)
+	require.NotNil(t, usage.BillingUsage)
+	assert.Positive(t, usage.CompletionTokens)
+	assert.Positive(t, usage.BillingUsage.ClaudeUsage.OutputTokens)
+	assert.NotContains(t, recorder.Body.String(), "[DONE]")
+	assert.NotContains(t, recorder.Body.String(), `"finish_reason":"stop"`)
+}
