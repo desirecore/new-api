@@ -508,3 +508,19 @@ func TestClaudeReasoningReplayInterruptedUsage(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "[DONE]")
 	assert.NotContains(t, recorder.Body.String(), `"finish_reason":"stop"`)
 }
+
+func TestClaudeReasoningReplayConfirmsBeforeFirstStreamEvent(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	// An upstream can switch a non-stream request to SSE by Content-Type. The
+	// scanner may keep the connection alive before receiving its first event.
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ReasoningReplayEnabled: true, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude"}}
+	_, apiErr := ClaudeStreamHandler(c, &http.Response{Body: io.NopCloser(strings.NewReader(""))}, info)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, "v1", recorder.Header().Get(replay.Header))
+	assert.NotContains(t, recorder.Body.String(), "[DONE]")
+}

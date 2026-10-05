@@ -328,6 +328,11 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 }
 
 func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
+	// Content-Type can switch a non-stream request to SSE after DoRequest.
+	// Confirm before the scanner's keepalive can commit response headers.
+	if info.ReasoningReplayEnabled {
+		c.Header(replay.Header, "v1")
+	}
 	claudeInfo := &ClaudeResponseInfo{
 		ResponseId:   helper.GetResponseID(c),
 		Created:      common.GetTimestamp(),
