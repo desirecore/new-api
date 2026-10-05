@@ -3,6 +3,7 @@ package relayconvert
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,4 +132,184 @@ func TestReasoningReplayExactToolValues(t *testing.T) {
 			require.Error(t, err)
 		}
 	}
+}
+
+func TestReasoningReplayStreamParity(t *testing.T) {
+	for _, content := range []string{replayFixture, `[]`, `[{"type":"text","text":""}]`, `[{"type":"thinking","thinking":"","signature":"opaque"}]`, `[{"type":"tool_use","id":"one","name":"f","input":{}},{"type":"text","text":"between"},{"type":"tool_use","id":"two","name":"f","input":{"x":2}}]`} {
+		for _, split := range []bool{false, true} {
+			var response dto.ClaudeResponse
+			require.NoError(t, kitutil.Unmarshal([]byte(`{"type":"message","role":"assistant","stop_reason":"end_turn","content":`+content+`}`), &response))
+			nonstream, err := ResponseClaude2OpenAIWithOptions(&response, &convmeta.ReasoningReplayOptions{})
+			require.NoError(t, err)
+			state := NewClaudeToChatStreamStateWithOptions(&convmeta.ReasoningReplayOptions{})
+			var chunks []*dto.ChatCompletionsStreamResponse
+			var blocks []json.RawMessage
+			require.NoError(t, kitutil.Unmarshal([]byte(content), &blocks))
+			events := []string{`{"type":"message_start","message":{"id":"id","role":"assistant","content":[],"model":"model"}}`}
+			for i, block := range blocks {
+				if split {
+					var fields map[string]json.RawMessage
+					require.NoError(t, kitutil.Unmarshal(block, &fields))
+					var kind string
+					require.NoError(t, kitutil.Unmarshal(fields["type"], &kind))
+					var deltas []string
+					for _, field := range []string{"text", "thinking", "signature", "input"} {
+						value, exists := fields[field]
+						if !exists {
+							continue
+						}
+						if field == "input" {
+							fields[field] = json.RawMessage(`{}`)
+							value, _ = kitutil.Marshal(string(value))
+							deltas = append(deltas, `{"type":"input_json_delta","partial_json":`+string(value)+`}`)
+						} else {
+							fields[field] = json.RawMessage(`""`)
+							deltas = append(deltas, `{"type":"`+field+`_delta","`+field+`":`+string(value)+`}`)
+						}
+					}
+					if kind == "redacted_thinking" {
+						deltas = nil
+					}
+					start, err := kitutil.Marshal(fields)
+					require.NoError(t, err)
+					events = append(events, fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":%s}`, i, start))
+					for _, delta := range deltas {
+						events = append(events, fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":%s}`, i, delta))
+					}
+				} else {
+					events = append(events, fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":%s}`, i, block))
+				}
+				events = append(events, fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, i))
+			}
+			events = append(events, `{"type":"ping"}`, `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`, `{"type":"message_stop"}`)
+			for i, event := range events {
+				var response dto.ClaudeResponse
+				require.NoError(t, kitutil.Unmarshal([]byte(event), &response))
+				chunk, err := state.ConvertChunk(&response)
+				require.NoError(t, err, event)
+				if chunk == nil {
+					continue
+				}
+				chunks = append(chunks, chunk)
+				if i < len(events)-1 {
+					for _, choice := range chunk.Choices {
+						assert.Nil(t, choice.FinishReason)
+						assert.Nil(t, choice.Delta.NewAPIReasoning)
+					}
+				}
+			}
+			require.NoError(t, state.Finalize())
+			final := chunks[len(chunks)-1].Choices[0]
+			require.NotNil(t, final.Delta.NewAPIReasoning)
+			require.NotNil(t, final.FinishReason)
+			equal, err := kitutil.JSONValuesEqual([]byte(content), final.Delta.NewAPIReasoning.Content)
+			require.NoError(t, err)
+			assert.True(t, equal)
+			message := dto.Message{Role: "assistant", NewAPIReasoning: final.Delta.NewAPIReasoning}
+			var calls []dto.ToolCallResponse
+			for _, chunk := range chunks {
+				for _, choice := range chunk.Choices {
+					delta := choice.Delta
+					if delta.Content != nil {
+						if message.Content == nil {
+							message.Content = ""
+						}
+						message.Content = message.Content.(string) + *delta.Content
+					}
+					if delta.ReasoningContent != nil {
+						if message.ReasoningContent == nil {
+							message.ReasoningContent = kitutil.GetPointer("")
+						}
+						*message.ReasoningContent += *delta.ReasoningContent
+					}
+					for _, call := range delta.ToolCalls {
+						require.NotNil(t, call.Index)
+						idx := *call.Index
+						for len(calls) <= idx {
+							calls = append(calls, dto.ToolCallResponse{})
+						}
+						if call.ID != "" {
+							calls[idx].ID = call.ID
+							calls[idx].Type = call.Type
+							calls[idx].Function.Name = call.Function.Name
+						}
+						calls[idx].Function.Arguments += call.Function.Arguments
+					}
+				}
+			}
+			if len(calls) > 0 {
+				for i := range calls {
+					calls[i].Index = nil
+				}
+				message.ToolCalls, err = kitutil.Marshal(calls)
+				require.NoError(t, err)
+			}
+			_, err = replay.Restore(message, convmeta.ReasoningReplayOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, nonstream.Choices[0].Message.Content, message.Content)
+			assert.Equal(t, nonstream.Choices[0].Message.ReasoningContent, message.ReasoningContent)
+		}
+	}
+}
+
+func TestReasoningReplayStreamTerminal(t *testing.T) {
+	for _, events := range [][]string{
+		{`{"type":"message_stop"}`},
+		{`{"type":"message_start","message":{"content":[]}}`, `{"type":"message_stop"}`},
+		{`{"type":"message_start","message":{"content":[]}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"x"}}`},
+		{`{"type":"message_start","message":{"content":[]}}`, `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"","citations":[]}}`},
+		{`{"type":"message_start","message":{"content":[]}}`, `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"future_delta","text":""}}`},
+	} {
+		state := NewClaudeToChatStreamStateWithOptions(&convmeta.ReasoningReplayOptions{})
+		var err error
+		for _, event := range events {
+			var r dto.ClaudeResponse
+			require.NoError(t, kitutil.Unmarshal([]byte(event), &r))
+			_, err = state.ConvertChunk(&r)
+			if err != nil {
+				break
+			}
+		}
+		require.Error(t, err)
+		require.Error(t, state.Finalize())
+	}
+	for _, raw := range []string{`[{"type":"text","text":"","unknown":"sentinel"}]`, `[{"type":"thinking","thinking":null}]`} {
+		var r dto.ClaudeResponse
+		require.NoError(t, kitutil.Unmarshal([]byte(`{"content":`+raw+`}`), &r))
+		_, err := ResponseClaude2OpenAIWithOptions(&r, &convmeta.ReasoningReplayOptions{})
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "sentinel")
+	}
+	state := NewClaudeToChatStreamStateWithOptions(&convmeta.ReasoningReplayOptions{})
+	require.Error(t, state.Finalize())
+}
+
+func TestReasoningReplayRegistryTerminal(t *testing.T) {
+	info := &convmeta.Values{Options: &convmeta.Options{ReasoningReplay: &convmeta.ReasoningReplayOptions{}}}
+	state, err := NewResponseStreamState(types.RelayFormatClaude, types.RelayFormatOpenAI, ResponseStreamOptions{})
+	require.NoError(t, err)
+	for _, event := range []string{`{"type":"message_start","message":{"content":[]}}`, `{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}`} {
+		var r dto.ClaudeResponse
+		require.NoError(t, kitutil.Unmarshal([]byte(event), &r))
+		results, err := ConvertStreamResponseChunk(nil, info, state, &r)
+		require.NoError(t, err)
+		for _, result := range results {
+			chunk := result.Value.(*dto.ChatCompletionsStreamResponse)
+			for _, choice := range chunk.Choices {
+				require.Nil(t, choice.FinishReason)
+			}
+		}
+	}
+	_, err = FinalizeStreamResponse(nil, info, state)
+	require.Error(t, err)
+	results, err := ConvertStreamResponseChunk(nil, info, state, &dto.ClaudeResponse{Type: "message_stop"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	chunk := results[0].Value.(*dto.ChatCompletionsStreamResponse)
+	assert.Equal(t, "length", *chunk.Choices[0].FinishReason)
+	require.NotNil(t, chunk.Choices[0].Delta.NewAPIReasoning)
+	_, err = FinalizeStreamResponse(nil, info, state)
+	require.NoError(t, err)
+	_, err = ConvertStreamResponseChunk(nil, info, state, &dto.ClaudeResponse{Type: "message_stop"})
+	require.Error(t, err)
 }

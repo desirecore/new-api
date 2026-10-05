@@ -8,8 +8,10 @@ import (
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/reasonmap"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	sharedclaude "github.com/QuantumNous/new-api/relaykit/relayconvert/internal/shared/claude"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/replay"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -123,13 +125,30 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 // independent, dense index space used by Chat Completions tool_calls. Text and
 // thinking blocks therefore do not create holes in the downstream tool array.
 type ClaudeToChatStreamState struct {
+	replayOptions           *convmeta.ReasoningReplayOptions
+	replayBlocks            []replayStreamBlock
+	replayStarted           bool
+	replayStopped           bool
+	replayFinish            *string
+	replayBytes             int
+	replayError             error
 	toolIndexByContentBlock map[int]int
 	blockTypeByContentBlock map[int]string
 	nextToolIndex           int
 }
 
 func NewClaudeToChatStreamState() *ClaudeToChatStreamState {
+	return NewClaudeToChatStreamStateWithOptions(nil)
+}
+
+func NewClaudeToChatStreamStateWithOptions(options *convmeta.ReasoningReplayOptions) *ClaudeToChatStreamState {
+	var copied *convmeta.ReasoningReplayOptions
+	if options != nil {
+		v := *options
+		copied = &v
+	}
 	return &ClaudeToChatStreamState{
+		replayOptions:           copied,
 		toolIndexByContentBlock: make(map[int]int),
 		blockTypeByContentBlock: make(map[int]string),
 	}
@@ -138,6 +157,17 @@ func NewClaudeToChatStreamState() *ClaudeToChatStreamState {
 func (s *ClaudeToChatStreamState) ConvertChunk(claudeResponse *dto.ClaudeResponse) (*dto.ChatCompletionsStreamResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("Claude-to-Chat stream state is required")
+	}
+	if s.replayOptions != nil {
+		if s.replayError != nil {
+			return nil, s.replayError
+		}
+		output, err := s.convertReplayChunk(claudeResponse)
+		if err != nil {
+			s.replayError = &replay.Error{Code: replay.Unrepresentable, Path: "stream"}
+			return nil, s.replayError
+		}
+		return output, nil
 	}
 	if claudeResponse == nil {
 		return nil, nil
@@ -563,4 +593,298 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 		oaiResponse.Model = claudeInfo.Model
 	}
 	return true
+}
+
+func ResponseClaude2OpenAIWithOptions(response *dto.ClaudeResponse, options *convmeta.ReasoningReplayOptions) (*dto.OpenAITextResponse, error) {
+	if options == nil {
+		return ResponseClaude2OpenAI(response), nil
+	}
+	if response == nil {
+		return nil, &replay.Error{Code: replay.Unrepresentable, Path: "response"}
+	}
+	content, err := kitutil.Marshal(response.Content)
+	if len(response.RawJSON) > 0 {
+		if _, err := kitutil.ExactJSONValue(response.RawJSON); err != nil {
+			return nil, &replay.Error{Code: replay.Unrepresentable, Path: "response"}
+		}
+		var fields map[string]json.RawMessage
+		if err = kitutil.Unmarshal(response.RawJSON, &fields); err == nil {
+			content = fields["content"]
+		}
+	}
+	if err != nil {
+		return nil, &replay.Error{Code: replay.Unrepresentable, Path: "content"}
+	}
+	message, err := replay.Project(content, *options)
+	if err != nil {
+		return nil, &replay.Error{Code: replay.Unrepresentable, Path: "content"}
+	}
+	result := ResponseClaude2OpenAI(response)
+	result.Choices[0].Message = message
+	return result, nil
+}
+
+type replayStreamBlock struct {
+	fields       map[string]json.RawMessage
+	kind         string
+	stopped      bool
+	toolIndex    int
+	arguments    *strings.Builder
+	hasArguments bool
+}
+
+func (s *ClaudeToChatStreamState) Finalize() error {
+	if s == nil {
+		return &replay.Error{Code: replay.Unrepresentable, Path: "stream"}
+	}
+	if s.replayOptions == nil {
+		return nil
+	}
+	if s.replayError != nil {
+		return s.replayError
+	}
+	if !s.replayStopped {
+		return &replay.Error{Code: replay.Unrepresentable, Path: "stream"}
+	}
+	return nil
+}
+
+func (s *ClaudeToChatStreamState) convertReplayChunk(event *dto.ClaudeResponse) (*dto.ChatCompletionsStreamResponse, error) {
+	invalid := &replay.Error{Code: replay.Unrepresentable, Path: "stream"}
+	limits, err := replay.Limits(*s.replayOptions)
+	if err != nil {
+		return nil, err
+	}
+	if event == nil || s.replayStopped {
+		return nil, invalid
+	}
+	raw := event.RawJSON
+	if len(raw) == 0 {
+		raw, err = kitutil.Marshal(event)
+		if err != nil {
+			return nil, invalid
+		}
+	}
+	fields, err := replay.Object(raw, "event", "type", "index", "content_block", "delta", "message", "usage")
+	if err != nil {
+		return nil, err
+	}
+	if event.Type == "ping" {
+		return nil, nil
+	}
+	var choice dto.ChatCompletionsStreamResponseChoice
+	result := &dto.ChatCompletionsStreamResponse{Object: "chat.completion.chunk"}
+	switch event.Type {
+	case "message_start":
+		if s.replayStarted || event.Message == nil {
+			return nil, invalid
+		}
+		var message map[string]json.RawMessage
+		if err := kitutil.Unmarshal(fields["message"], &message); err != nil {
+			return nil, invalid
+		}
+		if rawContent, ok := message["content"]; ok {
+			equal, err := kitutil.JSONValuesEqual(rawContent, []byte("[]"))
+			if err != nil || !equal {
+				return nil, invalid
+			}
+		}
+		if event.Message.Role != "" && event.Message.Role != "assistant" {
+			return nil, invalid
+		}
+		s.replayStarted = true
+		choice.Delta.Role = "assistant"
+		result.Id = event.Message.Id
+		result.Model = event.Message.Model
+	case "content_block_start":
+		if !s.replayStarted || s.replayFinish != nil || event.Index == nil || *event.Index != len(s.replayBlocks) || event.ContentBlock == nil {
+			return nil, invalid
+		}
+		if len(s.replayBlocks) >= limits.MaxBlocks {
+			return nil, invalid
+		}
+		blockRaw := fields["content_block"]
+		projected, err := replay.Project(append(append([]byte("["), blockRaw...), ']'), limits)
+		if err != nil {
+			return nil, err
+		}
+		var blockFields map[string]json.RawMessage
+		if err := kitutil.Unmarshal(blockRaw, &blockFields); err != nil {
+			return nil, invalid
+		}
+		block := replayStreamBlock{fields: blockFields, kind: event.ContentBlock.Type, toolIndex: -1}
+		s.replayBytes += len(blockRaw) + 1
+		choice.Delta.ReasoningContent = projected.ReasoningContent
+		if text, ok := projected.Content.(string); ok {
+			choice.Delta.Content = &text
+		}
+		if block.kind == "tool_use" {
+			block.toolIndex = s.nextToolIndex
+			s.nextToolIndex++
+			call := projected.ParseToolCalls()[0]
+			args := call.Function.Arguments
+			empty, err := kitutil.JSONValuesEqual([]byte(args), []byte("{}"))
+			if err != nil {
+				return nil, invalid
+			}
+			if empty {
+				args = ""
+			}
+			choice.Delta.ToolCalls = []dto.ToolCallResponse{{Index: kitutil.GetPointer(block.toolIndex), ID: call.ID, Type: "function", Function: dto.FunctionResponse{Name: call.Function.Name, Arguments: args}}}
+		}
+		s.replayBlocks = append(s.replayBlocks, block)
+	case "content_block_delta":
+		if !s.replayStarted || s.replayFinish != nil || event.Index == nil || *event.Index < 0 || *event.Index >= len(s.replayBlocks) || event.Delta == nil {
+			return nil, invalid
+		}
+		block := &s.replayBlocks[*event.Index]
+		if block.stopped {
+			return nil, invalid
+		}
+		var key string
+		switch event.Delta.Type {
+		case "text_delta":
+			if block.kind != "text" {
+				return nil, invalid
+			}
+			key = "text"
+		case "thinking_delta":
+			if block.kind != "thinking" {
+				return nil, invalid
+			}
+			key = "thinking"
+		case "signature_delta":
+			if block.kind != "thinking" {
+				return nil, invalid
+			}
+			key = "signature"
+		case "input_json_delta":
+			if block.kind != "tool_use" {
+				return nil, invalid
+			}
+			key = "partial_json"
+		default:
+			return nil, invalid
+		}
+		delta, err := replay.Object(fields["delta"], "delta", "type", key)
+		if err != nil {
+			return nil, err
+		}
+		if kitutil.GetJsonType(delta[key]) != "string" {
+			return nil, invalid
+		}
+		var value string
+		if err := kitutil.Unmarshal(delta[key], &value); err != nil {
+			return nil, invalid
+		}
+		if key == "partial_json" {
+			empty, err := kitutil.JSONValuesEqual(block.fields["input"], []byte("{}"))
+			if err != nil || !empty {
+				return nil, invalid
+			}
+			s.replayBytes += len(value)
+			if s.replayBytes > limits.MaxMessageBytes {
+				return nil, invalid
+			}
+			block.hasArguments = true
+			if block.arguments == nil {
+				block.arguments = &strings.Builder{}
+			}
+			block.arguments.WriteString(value)
+			choice.Delta.ToolCalls = []dto.ToolCallResponse{{Index: kitutil.GetPointer(block.toolIndex), Type: "function", Function: dto.FunctionResponse{Arguments: value}}}
+		} else {
+			var previous string
+			if old := block.fields[key]; old != nil {
+				if err := kitutil.Unmarshal(old, &previous); err != nil {
+					return nil, invalid
+				}
+			}
+			encoded, err := kitutil.Marshal(previous + value)
+			if err != nil {
+				return nil, invalid
+			}
+			s.replayBytes += len(encoded) - len(block.fields[key])
+			block.fields[key] = encoded
+			switch key {
+			case "text":
+				choice.Delta.Content = &value
+			case "thinking":
+				choice.Delta.ReasoningContent = &value
+			}
+		}
+	case "content_block_stop":
+		if !s.replayStarted || event.Index == nil || *event.Index < 0 || *event.Index >= len(s.replayBlocks) {
+			return nil, invalid
+		}
+		block := &s.replayBlocks[*event.Index]
+		if block.stopped {
+			return nil, invalid
+		}
+		if block.kind == "tool_use" {
+			if block.hasArguments {
+				raw := []byte(block.arguments.String())
+				if _, err := kitutil.ExactJSONValue(raw); err != nil || kitutil.GetJsonType(raw) != "object" {
+					return nil, invalid
+				}
+				block.fields["input"] = raw
+			} else {
+				empty, err := kitutil.JSONValuesEqual(block.fields["input"], []byte("{}"))
+				if err != nil {
+					return nil, invalid
+				}
+				if empty {
+					choice.Delta.ToolCalls = []dto.ToolCallResponse{{Index: kitutil.GetPointer(block.toolIndex), Type: "function", Function: dto.FunctionResponse{Arguments: "{}"}}}
+				}
+			}
+		}
+		block.stopped = true
+	case "message_delta":
+		if !s.replayStarted || s.replayFinish != nil || event.Delta == nil {
+			return nil, invalid
+		}
+		if _, err := replay.Object(fields["delta"], "delta", "stop_reason", "stop_sequence"); err != nil {
+			return nil, err
+		}
+		for i := range s.replayBlocks {
+			if !s.replayBlocks[i].stopped {
+				return nil, invalid
+			}
+		}
+		if event.Delta.StopReason != nil {
+			finish := StopReasonClaudeToOpenAI(*event.Delta.StopReason)
+			if finish == "" || finish == "null" {
+				return nil, invalid
+			}
+			s.replayFinish = &finish
+		}
+	case "message_stop":
+		if !s.replayStarted || s.replayFinish == nil {
+			return nil, invalid
+		}
+		blocks := make([]map[string]json.RawMessage, 0, len(s.replayBlocks))
+		for i := range s.replayBlocks {
+			if !s.replayBlocks[i].stopped {
+				return nil, invalid
+			}
+			blocks = append(blocks, s.replayBlocks[i].fields)
+		}
+		content, err := kitutil.Marshal(blocks)
+		if err != nil {
+			return nil, invalid
+		}
+		projected, err := replay.Project(content, limits)
+		if err != nil {
+			return nil, err
+		}
+		choice.Delta.NewAPIReasoning = projected.NewAPIReasoning
+		choice.FinishReason = s.replayFinish
+		s.replayStopped = true
+	default:
+		return nil, invalid
+	}
+	if s.replayBytes > limits.MaxMessageBytes {
+		return nil, invalid
+	}
+	result.Choices = []dto.ChatCompletionsStreamResponseChoice{choice}
+	return result, nil
 }

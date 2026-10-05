@@ -208,3 +208,10 @@ func FinalizeResponsesToChatStream(state *ResponsesToChatStreamState) []dto.Chat
 func NewResponsesBufferedAccumulator() *ResponsesBufferedAccumulator {
 	return oairesponses.NewResponsesBufferedAccumulator()
 }
+
+func ResponseClaude2OpenAIWithOptions(response *dto.ClaudeResponse, options *convmeta.ReasoningReplayOptions) (*dto.OpenAITextResponse, error) {
+	return claudemessages.ResponseClaude2OpenAIWithOptions(response, options)
+}
+func NewClaudeToChatStreamStateWithOptions(options *convmeta.ReasoningReplayOptions) *ClaudeToChatStreamState {
+	return claudemessages.NewClaudeToChatStreamStateWithOptions(options)
+}

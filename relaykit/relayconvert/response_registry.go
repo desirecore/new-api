@@ -1123,20 +1123,26 @@ func finalizeOAIChatStreamResponseToGeminiChat(_ context.Context, info convmeta.
 	return streamValuesFromAny(responses), streamState.Usage(), nil
 }
 
-func convertClaudeMessagesResponseToOAIChat(_ context.Context, _ convmeta.Meta, response any) (any, *dto.Usage, error) {
+func convertClaudeMessagesResponseToOAIChat(_ context.Context, info convmeta.Meta, response any) (any, *dto.Usage, error) {
 	claudeResponse, err := asClaudeResponse(response)
 	if err != nil {
 		return nil, nil, err
 	}
 	usage := usageFromClaudeResponse(claudeResponse)
-	openAIResponse := ResponseClaude2OpenAI(claudeResponse)
+	openAIResponse, err := ResponseClaude2OpenAIWithOptions(claudeResponse, convmeta.OptionsOf(info).ReasoningReplay)
+	if err != nil {
+		return nil, usage, err
+	}
 	if usage != nil {
 		openAIResponse.Usage = *usage
 	}
 	return openAIResponse, usage, nil
 }
 
-func convertClaudeMessagesStreamResponseToOAIChat(_ context.Context, _ convmeta.Meta, response any) (any, *dto.Usage, error) {
+func convertClaudeMessagesStreamResponseToOAIChat(_ context.Context, info convmeta.Meta, response any) (any, *dto.Usage, error) {
+	if convmeta.OptionsOf(info).ReasoningReplay != nil {
+		return nil, nil, errors.New("reasoning_replay_unrepresentable: stateful stream required")
+	}
 	claudeResponse, err := asClaudeResponse(response)
 	if err != nil {
 		return nil, nil, err
@@ -1149,20 +1155,37 @@ func convertClaudeMessagesStreamResponseToOAIChat(_ context.Context, _ convmeta.
 	return openAIResponse, usage, nil
 }
 
-func newClaudeMessagesToOAIChatStreamState(_ ResponseStreamOptions) any {
-	return claudemessages.NewClaudeToChatStreamState()
+type claudeMessagesChatStreamState struct {
+	converter *claudemessages.ClaudeToChatStreamState
 }
 
-func convertClaudeMessagesStreamResponseChunkToOAIChat(_ context.Context, _ convmeta.Meta, response any, state any) ([]any, *dto.Usage, error) {
+func newClaudeMessagesToOAIChatStreamState(_ ResponseStreamOptions) any {
+	return &claudeMessagesChatStreamState{}
+}
+func finalizeClaudeMessagesToOAIChatStream(_ context.Context, info convmeta.Meta, state any) ([]any, *dto.Usage, error) {
+	wrapper, ok := state.(*claudeMessagesChatStreamState)
+	if !ok || wrapper == nil {
+		return nil, nil, errors.New("Claude-to-Chat stream state is required")
+	}
+	if wrapper.converter == nil {
+		wrapper.converter = claudemessages.NewClaudeToChatStreamStateWithOptions(convmeta.OptionsOf(info).ReasoningReplay)
+	}
+	return nil, nil, wrapper.converter.Finalize()
+}
+
+func convertClaudeMessagesStreamResponseChunkToOAIChat(_ context.Context, info convmeta.Meta, response any, state any) ([]any, *dto.Usage, error) {
 	claudeResponse, err := asClaudeResponse(response)
 	if err != nil {
 		return nil, nil, err
 	}
-	streamState, ok := state.(*claudemessages.ClaudeToChatStreamState)
-	if !ok || streamState == nil {
+	wrapper, ok := state.(*claudeMessagesChatStreamState)
+	if !ok || wrapper == nil {
 		return nil, nil, errors.New("Claude-to-Chat stream state is required")
 	}
-	openAIResponse, err := streamState.ConvertChunk(claudeResponse)
+	if wrapper.converter == nil {
+		wrapper.converter = claudemessages.NewClaudeToChatStreamStateWithOptions(convmeta.OptionsOf(info).ReasoningReplay)
+	}
+	openAIResponse, err := wrapper.converter.ConvertChunk(claudeResponse)
 	if err != nil {
 		return nil, nil, err
 	}
