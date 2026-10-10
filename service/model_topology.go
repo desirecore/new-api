@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 	"slices"
 	"strings"
 )
@@ -314,6 +315,13 @@ func GetModelTopologyDetail(group, name string) (*TopologyDetail, error) {
 			consistency = "inconsistent"
 		}
 		c := TopologyChannel{ChannelID: ch.ID, ChannelName: ch.Name, ChannelType: ch.Type, ChannelStatus: ch.Status, ConfiguredWeight: w, Priority: p, AbilityConsistency: consistency, RelatedModelCountInGroup: len(topologyTokens(ch.Models)), Diagnostics: diagnostics, Mapping: TopologyMapping{Names: []string{name}, Status: "unchanged", Scope: "channel_mapping", Diagnostics: []TopologyDiagnostic{}}}
+		if ch.ModelMapping != nil {
+			c.Mapping = ResolveModelTopologyMapping(name, *ch.ModelMapping)
+		}
+		for i := range c.Mapping.Diagnostics {
+			c.Mapping.Diagnostics[i].AffectedChannelID = ch.ID
+		}
+		c.Diagnostics = append(c.Diagnostics, c.Mapping.Diagnostics...)
 		if ch.Status != common.ChannelStatusEnabled {
 			d.ExcludedChannels = append(d.ExcludedChannels, c)
 		} else {
@@ -337,4 +345,43 @@ func GetModelTopologyDetail(group, name string) (*TopologyDetail, error) {
 		d.Tiers = append(d.Tiers, TopologyTier{p, tiers[p]})
 	}
 	return d, nil
+}
+
+// ResolveModelTopologyMapping mirrors ModelMappedHelper, with a bounded display
+// chain. It is an observation, never a replacement for relay-time mapping.
+func ResolveModelTopologyMapping(name, raw string) TopologyMapping {
+	result := TopologyMapping{Names: []string{name}, Status: "unchanged", Scope: "channel_mapping", Diagnostics: []TopologyDiagnostic{}}
+	if raw == "" || raw == "{}" {
+		return result
+	}
+	mapping := map[string]string{}
+	if err := common.UnmarshalJsonStr(raw, &mapping); err != nil {
+		result.Status = "invalid"
+		result.Diagnostics = append(result.Diagnostics, TopologyDiagnostic{"invalid_mapping", "error", 0})
+		return result
+	}
+	current := name
+	visited := map[string]bool{name: true}
+	for range 64 {
+		target, ok := mapping[current]
+		base := hostreasoning.BaseModelName(current)
+		if (!ok || target == "") && base != current {
+			target, ok = mapping[base]
+		}
+		if !ok || target == "" || target == current {
+			return result
+		}
+		result.Names = append(result.Names, target)
+		if visited[target] {
+			result.Status = "cycle"
+			result.Diagnostics = append(result.Diagnostics, TopologyDiagnostic{"mapping_cycle", "error", 0})
+			return result
+		}
+		visited[target] = true
+		current = target
+		result.Status = "mapped"
+	}
+	result.Status = "truncated"
+	result.Diagnostics = append(result.Diagnostics, TopologyDiagnostic{"mapping_truncated", "warning", 0})
+	return result
 }

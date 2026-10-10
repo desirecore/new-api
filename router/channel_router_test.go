@@ -1,6 +1,10 @@
 package router
 
 import (
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -61,4 +65,40 @@ func assertChannelRoutePermission(t *testing.T, method string, path string, perm
 		}
 	}
 	t.Fatalf("route %s %s not found", method, path)
+}
+
+func TestModelTopologyRoutesRequireChannelRead(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := db.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
+	previous := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = previous })
+	require.NoError(t, authz.Init(db))
+	require.NoError(t, authz.SetUserPermissions(2, authz.PermissionsMap{"channel": {"read": false}}))
+	for _, tc := range []struct{ id, role, status int }{{1, common.RoleAdminUser, 200}, {2, common.RoleAdminUser, 403}, {3, common.RoleCommonUser, 403}} {
+		engine := gin.New()
+		engine.Use(func(c *gin.Context) { c.Set("id", tc.id); c.Set("role", tc.role) })
+		for _, route := range modelTopologyPermissionRoutes {
+			handlePermissionRoute(engine.Group("/api/model-topology"), route.method, route.path, route.permission, func(c *gin.Context) { c.JSON(200, gin.H{"channel": "private", "mapping": "vendor"}) })
+		}
+		for _, path := range []string{"groups", "models", "detail"} {
+			r := httptest.NewRecorder()
+			engine.ServeHTTP(r, httptest.NewRequest("GET", "/api/model-topology/"+path, nil))
+			assert.Equal(t, tc.status, r.Code)
+			if tc.status != 200 {
+				assert.NotContains(t, r.Body.String(), "private")
+				assert.NotContains(t, r.Body.String(), "vendor")
+			}
+		}
+	}
+	engine := gin.New()
+	setModelTopologyRoutes(engine.Group("/api"))
+	r := httptest.NewRecorder()
+	engine.ServeHTTP(r, httptest.NewRequest("GET", "/api/model-topology/groups", nil))
+	assert.Equal(t, 401, r.Code)
 }

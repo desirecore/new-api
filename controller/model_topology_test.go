@@ -2,6 +2,9 @@ package controller
 
 import (
 	"fmt"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
 	"testing"
@@ -102,3 +105,40 @@ func TestModelTopologyDatabaseMatrix(t *testing.T) {
 	}
 }
 func ptrTopology(s string) *string { return &s }
+
+func TestModelTopologyMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, status string
+		names             []string
+		fails             bool
+	}{
+		{"A", "", "unchanged", []string{"A"}, false},
+		{"A", `{"A":"B","B":"C"}`, "mapped", []string{"A", "B", "C"}, false},
+		{"A", `{"A":"A"}`, "unchanged", []string{"A"}, false},
+		{"A", `{"A":"B","B":"B"}`, "mapped", []string{"A", "B"}, false},
+		{"A", `{"A":"B","B":"A"}`, "cycle", []string{"A", "B", "A"}, true},
+		{"A", `{broken`, "invalid", []string{"A"}, true},
+		{"qwen3-max@thinking:on", `{"qwen3-max":"vendor"}`, "mapped", []string{"qwen3-max@thinking:on", "vendor"}, false},
+	} {
+		t.Run(tc.status+tc.raw, func(t *testing.T) {
+			actual := service.ResolveModelTopologyMapping(tc.name, tc.raw)
+			assert.Equal(t, tc.names, actual.Names)
+			assert.Equal(t, tc.status, actual.Status)
+			c, _ := gin.CreateTestContext(nil)
+			c.Set("model_mapping", tc.raw)
+			info := &relaycommon.RelayInfo{OriginModelName: tc.name, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: tc.name}}
+			err := helper.ModelMappedHelper(c, info, nil)
+			assert.Equal(t, tc.fails, err != nil)
+			if !tc.fails {
+				assert.Equal(t, tc.names[len(tc.names)-1], info.UpstreamModelName)
+			}
+		})
+	}
+	chain := map[string]string{}
+	for i := range 70 {
+		chain[fmt.Sprint(i)] = fmt.Sprint(i + 1)
+	}
+	raw, err := common.Marshal(chain)
+	require.NoError(t, err)
+	assert.Equal(t, "truncated", service.ResolveModelTopologyMapping("0", string(raw)).Status)
+}
