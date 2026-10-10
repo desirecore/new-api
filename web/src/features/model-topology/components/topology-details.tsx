@@ -35,8 +35,9 @@ export function TopologyDetails(props: {
     props.selection &&
     document.activeElement instanceof HTMLElement &&
     !document.activeElement.closest('[role="dialog"]')
-  )
-    {focus.current = document.activeElement}
+  ) {
+    focus.current = document.activeElement
+  }
   const selected = props.selection
   const detail = selected?.model
     ? props.view.details[selected.model]

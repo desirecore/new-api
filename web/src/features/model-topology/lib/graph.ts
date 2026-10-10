@@ -48,8 +48,9 @@ export function buildTopologyGraph(input: TopologyGraphInput): TopologyGraph {
       !input.expandedModels.has(model.name) ||
       !detail ||
       detail.group !== input.group
-    )
-      {continue}
+    ) {
+      continue
+    }
     const modelId = topologyId('model', input.group, model.name)
     const tiers = [
       ...detail.tiers,

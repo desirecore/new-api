@@ -57,3 +57,33 @@ describe('topology projection', () => {
     ).toBe(true)
   })
 })
+
+it('counts omitted nodes explicitly at the 300-node budget and keeps disabled channel facts', () => {
+  const d = detail('A', 'X')
+  const template = d.tiers[0].channels[0]
+  d.tiers[0].channels = Array.from({ length: 160 }, (_, i) => ({
+    ...template,
+    channel_id: i + 1,
+    channel_name: 'Same name',
+  }))
+  d.excluded_channels = [{ ...template, channel_id: 999, channel_status: 2 }]
+  const input = {
+    group: 'g',
+    models: [summary('A')],
+    detailsByModel: { A: d },
+    expandedModels: new Set(['A']),
+    visibleBudget: 300,
+    mode: 'tree' as const,
+  }
+  const limited = buildTopologyGraph(input)
+  expect(limited.nodes).toHaveLength(300)
+  expect(limited.omittedCounts.nodes).toBe(26)
+  const complete = buildTopologyGraph({ ...input, visibleBudget: 600 })
+  expect(complete.omittedCounts.nodes).toBe(0)
+  expect(complete.nodes.filter((n) => n.data.kind === 'channel')).toHaveLength(
+    161
+  )
+  expect(
+    complete.edges.find((e) => e.data?.channelId === 999)?.data?.disabled
+  ).toBe(true)
+})

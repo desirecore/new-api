@@ -24,8 +24,8 @@ it('isolates a late old-group response and keeps a successful detail after a sib
   let resolveA: (v: unknown) => void = () => {}
   vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
     if (url.endsWith('groups')) return { data: { success: true, data: [] } }
-    if (url.endsWith('models'))
-      {return {
+    if (url.endsWith('models')) {
+      return {
         data: {
           success: true,
           data: {
@@ -36,13 +36,15 @@ it('isolates a late old-group response and keeps a successful detail after a sib
             page_size: 50,
           },
         },
-      }}
+      }
+    }
     const group = config?.params.group as string
     const model = config?.params.model as string
-    if (group === 'g')
-      {return new Promise((resolve) => {
+    if (group === 'g') {
+      return new Promise((resolve) => {
         resolveA = resolve
-      })}
+      })
+    }
     if (model === 'B') throw new Error('unavailable')
     return { data: { success: true, data: detail(model, 'new', group) } }
   })
@@ -69,8 +71,8 @@ it('limits expansion requests to four and cancels the remaining queue on collaps
   const pending: ((value: unknown) => void)[] = []
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.endsWith('groups')) return { data: { success: true, data: [] } }
-    if (url.endsWith('models'))
-      {return {
+    if (url.endsWith('models')) {
+      return {
         data: {
           success: true,
           data: {
@@ -81,7 +83,8 @@ it('limits expansion requests to four and cancels the remaining queue on collaps
             page_size: 50,
           },
         },
-      }}
+      }
+    }
     return new Promise((resolve) => pending.push(resolve))
   })
   const { result } = renderHook(
@@ -100,4 +103,55 @@ it('limits expansion requests to four and cancels the remaining queue on collaps
   )
   expect(pending).toHaveLength(4)
   expect(result.current.total).toBe(120)
+})
+
+it('paginates the complete group and searches models outside the loaded pages', async () => {
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
+    if (url.endsWith('groups')) return { data: { success: true, data: [] } }
+    if (url.endsWith('detail')) {
+      return { data: { success: true, data: detail('org/model-a', 'vendor') } }
+    }
+    const params = config?.params
+    const items = params.keyword
+      ? [summary('org/model-a')]
+      : Array.from({ length: 50 }, (_, i) =>
+          summary(`m${(params.p - 1) * 50 + i}`)
+        )
+    return {
+      data: {
+        success: true,
+        data: {
+          items,
+          total: params.keyword ? 1 : 120,
+          group_total: 120,
+          page: params.p,
+          page_size: 50,
+        },
+      },
+    }
+  })
+  const { result, rerender } = renderHook(
+    (search: TopologySearch) =>
+      useTopologyView({ search, onSearchChange: () => {} }),
+    { initialProps: { tGroup: 'g' } as TopologySearch, wrapper: wrapper() }
+  )
+  await waitFor(() => expect(result.current.models).toHaveLength(50))
+  act(() => result.current.loadMoreModels())
+  await waitFor(() => expect(result.current.models).toHaveLength(100))
+  expect(result.current.models[50].name).toBe('m50')
+  rerender({ tGroup: 'g', tSearch: 'org/model-a', tModel: 'org/model-a' })
+  await waitFor(() =>
+    expect(result.current.models.map((m) => m.name)).toEqual(['org/model-a'])
+  )
+  await waitFor(() =>
+    expect(result.current.details['org/model-a']?.model).toBe('org/model-a')
+  )
+  expect(result.current.total).toBe(1)
+  expect(result.current.groupTotal).toBe(120)
+  expect(
+    get.mock.calls.some(
+      ([url, config]) =>
+        url.endsWith('models') && config?.params.keyword === 'org/model-a'
+    )
+  ).toBe(true)
 })

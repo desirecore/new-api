@@ -14,10 +14,11 @@ export function TopologyNode(props: NodeProps<Node<TopologyNodeData>>) {
   const d = props.data
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   let title = d.label
-  if (d.kind === 'tier')
-    {title = d.disabled
+  if (d.kind === 'tier') {
+    title = d.disabled
       ? t('Excluded channels')
-      : t('Priority {{value}}', { value: formatNumber(d.priority, locale) })}
+      : t('Priority {{value}}', { value: formatNumber(d.priority, locale) })
+  }
   return (
     <NodeCard
       handles={{ target: d.depth > 0, source: true }}

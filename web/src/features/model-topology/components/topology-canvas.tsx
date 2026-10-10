@@ -137,8 +137,9 @@ function TopologyCanvasContent(props: {
         (n) => selected?.model === n.data.model && n.data.kind === 'model'
       ) ||
       graph.nodes.find((n) => selected?.channelId === n.data.channelId)
-    if (node)
-      {void flow.fitView({ nodes: [{ id: node.id }], padding: 0.8, maxZoom: 1 })}
+    if (node) {
+      void flow.fitView({ nodes: [{ id: node.id }], padding: 0.8, maxZoom: 1 })
+    }
   }
   return (
     <div
@@ -192,12 +193,13 @@ function TopologyCanvasContent(props: {
         }}
         onPaneClick={() => props.view.setSelection(null)}
         onEdgeClick={(_event, edge) => {
-          if (edge.data?.channelId)
-            {props.view.setSelection({
+          if (edge.data?.channelId) {
+            props.view.setSelection({
               kind: 'relation',
               model: edge.data.model as string,
               channelId: edge.data.channelId as number,
-            })}
+            })
+          }
         }}
         ariaLabelConfig={{
           'controls.zoomIn.ariaLabel': t('Zoom in'),

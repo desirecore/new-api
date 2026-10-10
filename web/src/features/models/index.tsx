@@ -19,10 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import {
+  type ReactNode,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -44,12 +52,22 @@ import {
   MODELS_SECTION_IDS,
 } from './section-registry'
 
+const ModelTopology = lazy(() =>
+  import('@/features/model-topology').then((module) => ({
+    default: module.ModelTopology,
+  }))
+)
+
 const route = getRouteApi('/_authenticated/models/$section')
 
 const SECTION_META: Record<
   ModelsSectionId,
   { titleKey: string; tabKey: string }
 > = {
+  topology: {
+    titleKey: 'Group model topology',
+    tabKey: 'Group model topology',
+  },
   metadata: {
     titleKey: 'Model management',
     tabKey: 'Models',
@@ -66,6 +84,7 @@ function ModelsContent() {
   const navigate = useNavigate({ from: '/models/$section' })
   const { tabCategory, setTabCategory, setOpen, setCurrentVendor } = useModels()
   const params = route.useParams()
+  const search = route.useSearch()
   const activeSection = (params.section ??
     MODELS_DEFAULT_SECTION) as ModelsSectionId
 
@@ -92,7 +111,7 @@ function ModelsContent() {
 
   const meta = SECTION_META[activeSection] ?? SECTION_META.metadata
 
-  let actions = <ModelsPrimaryButtons />
+  let actions: ReactNode = <ModelsPrimaryButtons />
   let content = <ModelsTable />
   if (activeSection === 'vendors') {
     actions = (
@@ -108,6 +127,18 @@ function ModelsContent() {
       </Button>
     )
     content = <VendorsTable />
+  } else if (activeSection === 'topology') {
+    actions = null
+    content = (
+      <Suspense fallback={<LoadingState />}>
+        <ModelTopology
+          search={search}
+          onSearchChange={(next) => {
+            void navigate({ search: (previous) => ({ ...previous, ...next }) })
+          }}
+        />
+      </Suspense>
+    )
   } else if (activeSection === 'deployments') {
     actions = (
       <Button onClick={() => setCreateDeploymentOpen(true)} size='sm'>

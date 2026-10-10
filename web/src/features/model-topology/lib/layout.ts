@@ -10,8 +10,9 @@ export function layoutTopologyGraph(
     for (const depth of [0, 1, 2]) {
       const layer = graph.nodes.filter((n) => n.data.depth === depth)
       layer.sort((a, b) => a.id.localeCompare(b.id))
-      for (const [row, node] of layer.entries())
-        {positions.set(node.id, { x: depth * 340, y: row * 160 })}
+      for (const [row, node] of layer.entries()) {
+        positions.set(node.id, { x: depth * 340, y: row * 160 })
+      }
     }
   } else {
     let cursor = 0
@@ -27,8 +28,9 @@ export function layoutTopologyGraph(
         Math.max(1, ...[...depths.values()].map((layer) => layer.length)) * 160
       const start = Math.max(cursor, previousPositions?.get(model.id)?.y ?? 0)
       for (const [depth, layer] of depths) {
-        for (const [row, node] of layer.entries())
-          {positions.set(node.id, { x: depth * 340, y: start + row * 160 })}
+        for (const [row, node] of layer.entries()) {
+          positions.set(node.id, { x: depth * 340, y: start + row * 160 })
+        }
       }
       cursor = start + height + 60
     }

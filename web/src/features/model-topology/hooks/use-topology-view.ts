@@ -105,26 +105,29 @@ export function useTopologyView(input: TopologyViewInput) {
   const detailLoading = new Set<string>()
   for (const [index, result] of results.entries()) {
     const name = requested[index]
-    if (result.data?.group === group && result.data.model === name)
-      {details[name] = result.data}
+    if (result.data?.group === group && result.data.model === name) {
+      details[name] = result.data
+    }
     if (result.isError) detailErrors.add(name)
-    if (result.isFetching || (!result.data && !result.isError))
-      {detailLoading.add(name)}
+    if (result.isFetching || (!result.data && !result.isError)) {
+      detailLoading.add(name)
+    }
   }
   const models = [...pagedModels]
   if (
     input.search.tModel &&
     details[input.search.tModel] &&
     !models.some((m) => m.name === input.search.tModel)
-  )
-    {models.unshift(details[input.search.tModel].summary)}
+  ) {
+    models.unshift(details[input.search.tModel].summary)
+  }
   const singletonName =
     modelsQuery.data?.pages[0]?.total === 1
       ? modelsQuery.data.pages[0].items[0]?.name
       : undefined
   useEffect(() => {
-    if (singletonName)
-      {setLocal((prev) =>
+    if (singletonName) {
+      setLocal((prev) =>
         prev.group === scope && prev.expanded.has(singletonName)
           ? prev
           : {
@@ -132,7 +135,8 @@ export function useTopologyView(input: TopologyViewInput) {
               expanded: new Set([singletonName]),
               selection: prev.group === scope ? prev.selection : null,
             }
-      )}
+      )
+    }
   }, [scope, singletonName])
   function expandModel(name: string) {
     setLocal({ ...active, expanded: new Set([...expanded, name]) })
@@ -148,8 +152,9 @@ export function useTopologyView(input: TopologyViewInput) {
           ? { kind: 'model', model: name }
           : active.selection,
     })
-    if (input.search.tModel === name)
-      {input.onSearchChange({ tModel: undefined })}
+    if (input.search.tModel === name) {
+      input.onSearchChange({ tModel: undefined })
+    }
   }
   function setSelection(next: TopologySelection | null) {
     setLocal({ ...active, selection: next })
