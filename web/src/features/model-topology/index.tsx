@@ -1,3 +1,4 @@
+import type { Viewport } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -41,6 +42,7 @@ function TopologyPage(props: TopologyViewInput) {
   const key = JSON.stringify([view.group, view.mode])
   const [capacity, setCapacity] = useState({ key, budget: 300 })
   const budget = capacity.key === key ? capacity.budget : 300
+  const viewports = useRef(new Map<string, Viewport>())
   const previous = useRef(
     new Map<string, Map<string, { x: number; y: number }>>()
   )
@@ -74,7 +76,9 @@ function TopologyPage(props: TopologyViewInput) {
       new Map(graph.nodes.map((n) => [n.id, n.position]))
     )
   }, [graph, key])
-  let content = <TopologyCanvas graph={graph} view={view} />
+  let content = (
+    <TopologyCanvas graph={graph} view={view} viewports={viewports.current} />
+  )
   if (view.mode === 'table') content = <TopologyTable view={view} />
   if (view.loading) content = <LoadingState />
   else if (view.errors && !view.models.length) {
@@ -107,7 +111,7 @@ function TopologyPage(props: TopologyViewInput) {
     )
   }
   return (
-    <div className='flex h-full min-h-0 flex-col gap-3'>
+    <div className='flex h-full min-h-0 flex-col gap-3 overflow-y-auto'>
       <TopologyToolbar view={view} />
       <div className='text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs'>
         <span>
@@ -142,7 +146,7 @@ function TopologyPage(props: TopologyViewInput) {
           </Button>
         </p>
       )}
-      <div className='min-h-0 flex-1'>{content}</div>
+      <div className='relative min-h-[240px] flex-1'>{content}</div>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         {view.hasMoreModels && (
           <Button

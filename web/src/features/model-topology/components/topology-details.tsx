@@ -50,12 +50,18 @@ export function TopologyDetails(props: {
   const summary =
     detail?.summary ?? props.view.models.find((m) => m.name === selected?.model)
   const related = selected?.channelId
-    ? Object.values(props.view.details).flatMap((d) =>
-        topologyChannels(d)
-          .filter((ch) => ch.channel_id === selected.channelId)
-          .map((ch) => ({ model: d.model, channel: ch }))
-      )
+    ? props.view.models
+        .filter((m) => m.channel_ids.includes(selected.channelId ?? 0))
+        .map((m) => ({
+          model: m.name,
+          channel: props.view.details[m.name]
+            ? topologyChannels(props.view.details[m.name]).find(
+                (ch) => ch.channel_id === selected.channelId
+              )
+            : undefined,
+        }))
     : []
+  const sharedChannel = related.find((r) => r.channel)?.channel
   return (
     <Sheet
       open={!!selected}
@@ -69,7 +75,7 @@ export function TopologyDetails(props: {
       >
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle className='break-all'>
-            {selected?.model ?? props.view.group}
+            {selected?.model ?? sharedChannel?.channel_name ?? props.view.group}
           </SheetTitle>
           <SheetDescription>
             {t('Configuration topology')} · {t('Channel mapping only')}
@@ -143,10 +149,18 @@ export function TopologyDetails(props: {
           {selected?.kind === 'channel' && !selected.model && (
             <>
               <p>
+                #{formatNumber(selected.channelId, locale)} ·{' '}
+                {sharedChannel?.channel_status === 1
+                  ? t('Enabled')
+                  : t('Disabled')}{' '}
+                · {t('Channel type')}:{' '}
+                {formatNumber(sharedChannel?.channel_type, locale)}
+              </p>
+              <p>
                 {t('{{loaded}} loaded / {{total}} related models', {
                   loaded: formatNumber(related.length, locale),
                   total: formatNumber(
-                    related[0]?.channel.related_model_count_in_group,
+                    sharedChannel?.related_model_count_in_group,
                     locale
                   ),
                 })}
@@ -164,7 +178,8 @@ export function TopologyDetails(props: {
                     })
                   }
                 >
-                  {r.model} · {r.channel.mapping.names.join(' → ')}
+                  {r.model}
+                  {r.channel ? ` · ${r.channel.mapping.names.join(' → ')}` : ''}
                 </Button>
               ))}
               <Button

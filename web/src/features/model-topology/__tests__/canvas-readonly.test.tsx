@@ -10,6 +10,7 @@ import { summary } from './fixtures'
 it('keeps nodes after deletion keys and never offers an editing toggle', () => {
   const view = {
     group: 'g',
+    models: [summary('A')],
     mode: 'tree',
     selection: null,
     details: {},
@@ -45,4 +46,11 @@ it('keeps nodes after deletion keys and never offers an editing toggle', () => {
   expect(
     screen.getByRole('button', { name: 'Exit full screen' })
   ).toBeInTheDocument()
+  expect(
+    container.querySelector('[aria-label="Model topology canvas"]')
+  ).toBeNull()
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(
+    container.querySelector('[aria-label="Model topology canvas"]')
+  ).not.toBeNull()
 })

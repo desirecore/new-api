@@ -38,3 +38,50 @@ it('places a deterministic left-to-right tree without overlapping cards', () => 
     layoutTopologyGraph(graph, 'tree', previous).nodes.map((n) => n.position)
   ).toEqual(laid.nodes.map((n) => n.position))
 })
+
+it('centers each priority tier on its own parallel channel candidates', () => {
+  const d = detail('A', 'X')
+  d.tiers[0].channels.push({ ...d.tiers[0].channels[0], channel_id: 8 })
+  const graph = layoutTopologyGraph(
+    buildTopologyGraph({
+      group: 'g',
+      models: [summary('A')],
+      detailsByModel: { A: d },
+      expandedModels: new Set(['A']),
+      visibleBudget: 300,
+      mode: 'tree',
+    }),
+    'tree'
+  )
+  expect(graph.nodes.find((n) => n.data.kind === 'tier')?.position.y).toBe(80)
+  expect(
+    graph.nodes
+      .filter((n) => n.data.kind === 'channel')
+      .map((n) => n.position.y)
+  ).toEqual([0, 160])
+})
+
+it('keeps a truncated priority tier separate from the visible tier', () => {
+  const d = detail('A', 'X')
+  d.tiers.push({
+    ...d.tiers[0],
+    priority: 5,
+    channels: [{ ...d.tiers[0].channels[0], channel_id: 9 }],
+  })
+  const graph = layoutTopologyGraph(
+    buildTopologyGraph({
+      group: 'g',
+      models: [summary('A')],
+      detailsByModel: { A: d },
+      expandedModels: new Set(['A']),
+      visibleBudget: 6,
+      mode: 'tree',
+    }),
+    'tree'
+  )
+  const tiers = graph.nodes.filter((n) => n.data.kind === 'tier')
+  expect(tiers).toHaveLength(2)
+  expect(
+    Math.abs(tiers[0].position.y - tiers[1].position.y)
+  ).toBeGreaterThanOrEqual(120)
+})

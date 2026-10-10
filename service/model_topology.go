@@ -362,7 +362,7 @@ func ResolveModelTopologyMapping(name, raw string) TopologyMapping {
 	}
 	current := name
 	visited := map[string]bool{name: true}
-	for range 64 {
+	for step := range 65 {
 		target, ok := mapping[current]
 		base := hostreasoning.BaseModelName(current)
 		if (!ok || target == "") && base != current {
@@ -370,6 +370,9 @@ func ResolveModelTopologyMapping(name, raw string) TopologyMapping {
 		}
 		if !ok || target == "" || target == current {
 			return result
+		}
+		if step == 64 {
+			break
 		}
 		result.Names = append(result.Names, target)
 		if visited[target] {

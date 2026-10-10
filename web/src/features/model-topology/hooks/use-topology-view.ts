@@ -42,17 +42,29 @@ export function useTopologyView(input: TopologyViewInput) {
     group: string
     expanded: Set<string>
     selection: TopologySelection | null
-  }>({ group: scope, expanded: new Set(), selection: null })
+    urlModel?: string
+  }>({
+    group: scope,
+    expanded: new Set(),
+    selection: null,
+    urlModel: input.search.tModel,
+  })
   const active =
     local.group === scope
       ? local
-      : { group: scope, expanded: new Set<string>(), selection: null }
+      : {
+          group: scope,
+          expanded: new Set<string>(),
+          selection: null,
+          urlModel: input.search.tModel,
+        }
   const expanded = new Set(active.expanded)
-  const selection =
-    active.selection ??
-    (input.search.tModel
-      ? { kind: 'model' as const, model: input.search.tModel }
-      : null)
+  let selection = active.selection
+  if (active.urlModel !== input.search.tModel || !selection) {
+    selection = input.search.tModel
+      ? { kind: 'model', model: input.search.tModel }
+      : null
+  }
   const filters = {
     group,
     channel_id: input.search.tChannelId,
@@ -132,12 +144,13 @@ export function useTopologyView(input: TopologyViewInput) {
           ? prev
           : {
               group: scope,
+              urlModel: input.search.tModel,
               expanded: new Set([singletonName]),
               selection: prev.group === scope ? prev.selection : null,
             }
       )
     }
-  }, [scope, singletonName])
+  }, [scope, singletonName, input.search.tModel])
   function expandModel(name: string) {
     setLocal({ ...active, expanded: new Set([...expanded, name]) })
   }
@@ -157,11 +170,16 @@ export function useTopologyView(input: TopologyViewInput) {
     }
   }
   function setSelection(next: TopologySelection | null) {
-    setLocal({ ...active, selection: next })
+    setLocal({ ...active, selection: next, urlModel: next?.model })
     input.onSearchChange({ tModel: next?.model })
   }
   function collapseAll() {
-    setLocal({ ...active, expanded: new Set(), selection: null })
+    setLocal({
+      ...active,
+      expanded: new Set(),
+      selection: null,
+      urlModel: undefined,
+    })
     input.onSearchChange({ tModel: undefined })
     void client.cancelQueries({ queryKey: [...prefix, 'detail', group] })
   }

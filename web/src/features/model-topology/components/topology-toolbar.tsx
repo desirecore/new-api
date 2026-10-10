@@ -55,6 +55,20 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
   const { t, i18n } = useTranslation()
   const view = props.view
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  let mappingLabel = t('Any mapping configuration')
+  if (view.search.tMapping === true) {
+    mappingLabel = t('Has mapping configuration')
+  }
+  if (view.search.tMapping === false) {
+    mappingLabel = t('No mapping configuration')
+  }
+  let diagnosticsLabel = t('Any diagnostics')
+  if (view.search.tDiagnostics === true) {
+    diagnosticsLabel = t('Has configuration diagnostics')
+  }
+  if (view.search.tDiagnostics === false) {
+    diagnosticsLabel = t('No configuration diagnostics')
+  }
   function filter(next: Partial<TopologySearch>) {
     view.onSearchChange({ ...next, tModel: undefined })
   }
@@ -99,7 +113,16 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
           }
         >
           <SelectTrigger aria-label={t('Channel availability')}>
-            <SelectValue />
+            <SelectValue>
+              {
+                {
+                  all: t('All configurations'),
+                  enabled: t('Has enabled channels'),
+                  disabled: t('Disabled channels only'),
+                  inconsistent: t('Inconsistent configuration'),
+                }[view.search.tStatus ?? 'all']
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value='all'>{t('All configurations')}</SelectItem>
@@ -123,7 +146,7 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
           }
         >
           <SelectTrigger aria-label={t('Mapping filter')}>
-            <SelectValue />
+            <SelectValue>{mappingLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value='all'>
@@ -150,7 +173,7 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
           }
         >
           <SelectTrigger aria-label={t('Diagnostics filter')}>
-            <SelectValue />
+            <SelectValue>{diagnosticsLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value='all'>{t('Any diagnostics')}</SelectItem>

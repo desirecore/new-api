@@ -25,3 +25,22 @@ it('shows only the selected relationship mapping for a shared channel', () => {
   expect(screen.queryByText('B → Y')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
 })
+
+it('includes a collapsed loaded model among shared-channel relationships', () => {
+  const view = {
+    group: 'g',
+    models: [summary('A'), summary('B')],
+    details: { A: detail('A', 'X') },
+    detailLoading: new Set(),
+    detailErrors: new Set(),
+    setSelection: vi.fn(),
+  } as unknown as TopologyViewState
+  render(
+    <TopologyDetails
+      selection={{ kind: 'channel', channelId: 7 }}
+      view={view}
+      onClose={vi.fn()}
+    />
+  )
+  expect(screen.getByRole('button', { name: 'B' })).toBeInTheDocument()
+})

@@ -145,6 +145,7 @@ const GroupTriggerButton = React.forwardRef<
 >(({ currentLabel, triggerClassName, isDisabled, ...props }, ref) => (
   <Button
     ref={ref}
+    aria-label={currentLabel}
     variant='outline'
     role='combobox'
     size='sm'

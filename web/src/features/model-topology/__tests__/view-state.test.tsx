@@ -155,3 +155,40 @@ it('paginates the complete group and searches models outside the loaded pages', 
     )
   ).toBe(true)
 })
+
+it('restores the model from a changed URL instead of retaining an old local selection', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
+    if (url.endsWith('groups')) {
+      return { data: { success: true, data: [] } }
+    }
+    if (url.endsWith('models')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            items: [summary('A'), summary('B')],
+            total: 2,
+            group_total: 2,
+            page: 1,
+            page_size: 50,
+          },
+        },
+      }
+    }
+    return { data: { success: true, data: detail(config?.params.model, 'X') } }
+  })
+  const { result, rerender } = renderHook(
+    (search: TopologySearch) =>
+      useTopologyView({ search, onSearchChange: () => {} }),
+    {
+      initialProps: { tGroup: 'g', tModel: 'A' } as TopologySearch,
+      wrapper: wrapper(),
+    }
+  )
+  await waitFor(() => expect(result.current.details.A).toBeDefined())
+  act(() =>
+    result.current.setSelection({ kind: 'relation', model: 'A', channelId: 7 })
+  )
+  rerender({ tGroup: 'g', tModel: 'B' })
+  expect(result.current.selection?.model).toBe('B')
+})

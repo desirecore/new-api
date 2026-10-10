@@ -149,3 +149,22 @@ it('updates topology controls and formatted counts when switching Chinese locale
   expect(screen.getByRole('tab', { name: '模型鏈路樹' })).toBeInTheDocument()
   expect(screen.getByText(/分組共 1,234 個模型/)).toBeInTheDocument()
 })
+
+it('shows descriptive filter values instead of API enum identifiers', async () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data: url.endsWith('groups')
+        ? []
+        : { items: [], total: 0, group_total: 0, page: 1, page_size: 50 },
+    },
+  }))
+  mount()
+  expect(
+    screen.getByRole('combobox', { name: 'Channel availability' })
+  ).toHaveTextContent('All configurations')
+  expect(
+    screen.getByRole('combobox', { name: 'Mapping filter' })
+  ).toHaveTextContent('Any mapping configuration')
+})

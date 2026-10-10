@@ -97,6 +97,15 @@ func TestModelTopologyDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, 105, large.Total)
 			assert.Len(t, large.Items, 5)
+			for _, query := range []string{"?group=premium&p=0", "?group=premium&status=bad", "?group=premium&has_mapping=bad", "?group=premium&page_size=no"} {
+				r := modelManagementRequest(t, GetModelTopologyModels, http.MethodGet, "/api/model-topology/models"+query, nil, nil)
+				assert.Equal(t, 400, r.Code)
+			}
+			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 2).Update("model_mapping", "{broken").Error)
+			malformed, err := service.GetModelTopologyDetail("premium", "org/model")
+			require.NoError(t, err)
+			assert.Equal(t, "invalid", malformed.ExcludedChannels[0].Mapping.Status)
+			assert.Equal(t, []string{"org/model", "alias", "vendor"}, malformed.Tiers[0].Channels[0].Mapping.Names)
 			var count int64
 			require.NoError(t, db.Model(&model.Ability{}).Count(&count).Error)
 			assert.EqualValues(t, 2, count)
@@ -141,4 +150,16 @@ func TestModelTopologyMapping(t *testing.T) {
 	raw, err := common.Marshal(chain)
 	require.NoError(t, err)
 	assert.Equal(t, "truncated", service.ResolveModelTopologyMapping("0", string(raw)).Status)
+}
+
+func TestModelTopologyMappingExactly64Steps(t *testing.T) {
+	chain := map[string]string{}
+	for i := range 64 {
+		chain[fmt.Sprint(i)] = fmt.Sprint(i + 1)
+	}
+	raw, err := common.Marshal(chain)
+	require.NoError(t, err)
+	mapping := service.ResolveModelTopologyMapping("0", string(raw))
+	assert.Equal(t, "mapped", mapping.Status)
+	assert.Len(t, mapping.Names, 65)
 }

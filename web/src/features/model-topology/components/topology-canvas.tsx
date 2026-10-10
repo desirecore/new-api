@@ -4,7 +4,8 @@ import {
   useReactFlow,
   type Viewport,
 } from '@xyflow/react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { Canvas } from '@/components/ai-elements/canvas'
@@ -21,6 +22,7 @@ const nodeTypes = { topology: TopologyNode }
 export function TopologyCanvas(props: {
   graph: TopologyGraph
   view: TopologyViewState
+  viewports?: Map<string, Viewport>
 }) {
   return (
     <ReactFlowProvider>
@@ -31,20 +33,30 @@ export function TopologyCanvas(props: {
 function TopologyCanvasContent(props: {
   graph: TopologyGraph
   view: TopologyViewState
+  viewports?: Map<string, Viewport>
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const flow = useReactFlow()
   const [fullScreen, setFullScreen] = useState(false)
-  const viewports = useRef(new Map<string, Viewport>())
+  const internalViewports = useRef(new Map<string, Viewport>())
+  const viewports = props.viewports ?? internalViewports.current
   const key = JSON.stringify([props.view.group, props.view.mode])
-  const viewport = viewports.current.get(key)
+  const viewport = viewports.get(key)
+  useEffect(() => {
+    if (!fullScreen) return
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFullScreen(false)
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [fullScreen])
   const selected = props.view.selection
   const graph = useMemo(() => {
-    const channelModels = new Set(
-      props.graph.edges
-        .filter((e) => e.data?.channelId === selected?.channelId)
-        .map((e) => e.data?.model)
+    const channelModels = new Set<string | undefined>(
+      props.view.models
+        .filter((m) => m.channel_ids.includes(selected?.channelId ?? 0))
+        .map((m) => m.name)
     )
     const activeModels = selected?.model
       ? new Set([selected.model])
@@ -141,10 +153,10 @@ function TopologyCanvasContent(props: {
       void flow.fitView({ nodes: [{ id: node.id }], padding: 0.8, maxZoom: 1 })
     }
   }
-  return (
+  const canvas = (
     <div
       className={cn(
-        'bg-background relative h-full min-h-[420px] overflow-hidden rounded-lg border',
+        'bg-background relative h-full min-h-0 overflow-hidden rounded-lg border',
         fullScreen && 'fixed inset-0 z-40 h-dvh rounded-none'
       )}
       aria-label={t('Model topology canvas')}
@@ -178,7 +190,20 @@ function TopologyCanvasContent(props: {
         edges={graph.edges}
         nodeTypes={nodeTypes}
         defaultViewport={viewport}
-        fitView={!viewport}
+        fitView={false}
+        minZoom={0.02}
+        onInit={(instance) => {
+          if (!viewport) {
+            requestAnimationFrame(
+              () =>
+                void instance.fitView({
+                  nodes: graph.nodes.slice(0, 2),
+                  padding: 0.4,
+                  maxZoom: 1,
+                })
+            )
+          }
+        }}
         nodesDraggable={false}
         nodesConnectable={false}
         edgesReconnectable={false}
@@ -189,7 +214,7 @@ function TopologyCanvasContent(props: {
         selectionOnDrag={false}
         controlsProps={{ showInteractive: false }}
         onMoveEnd={(_event, next) => {
-          viewports.current.set(key, next)
+          viewports.set(key, next)
         }}
         onPaneClick={() => props.view.setSelection(null)}
         onEdgeClick={(_event, edge) => {
@@ -217,4 +242,5 @@ function TopologyCanvasContent(props: {
       </Canvas>
     </div>
   )
+  return fullScreen ? createPortal(canvas, document.body) : canvas
 }
