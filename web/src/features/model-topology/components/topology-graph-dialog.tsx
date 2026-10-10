@@ -12,7 +12,9 @@ import { formatNumber } from '@/lib/format'
 import type { TopologyViewState } from '../hooks/use-topology-view'
 import { buildTopologyGraph } from '../lib/graph'
 import { layoutTopologyGraph } from '../lib/layout'
+import type { TopologySelection } from '../types'
 import { TopologyCanvas } from './topology-canvas'
+import { TopologyDetails } from './topology-details'
 
 export function TopologyGraphDialog(props: {
   view: TopologyViewState
@@ -23,7 +25,11 @@ export function TopologyGraphDialog(props: {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [fullScreen, setFullScreen] = useState(false)
+  const [nodeSelection, setNodeSelection] = useState<TopologySelection | null>(
+    null
+  )
   const [budget, setBudget] = useState(300)
+  const nodeFocus = useRef<HTMLElement | null>(null)
   const viewports = useRef(new Map<string, Viewport>())
   const { view, model } = props
   const models = useMemo(
@@ -66,9 +72,15 @@ export function TopologyGraphDialog(props: {
     expandedModels: model ? new Set([model]) : view.expandedModels,
     setSelection: (selection: Parameters<typeof view.setSelection>[0]) => {
       if (model) {
-        view.setSelection(
-          selection?.model === model ? selection : { kind: 'model', model }
-        )
+        const next =
+          selection?.model === model
+            ? selection
+            : { kind: 'model' as const, model }
+        if (selection && document.activeElement instanceof HTMLElement) {
+          nodeFocus.current = document.activeElement
+        }
+        setNodeSelection(selection)
+        view.setSelection(next)
       } else if (selection) {
         props.onClose()
         view.setSelection(selection)
@@ -76,15 +88,31 @@ export function TopologyGraphDialog(props: {
     },
   }
   let content = props.open && (
-    <div className='min-h-0 flex-1'>
-      <TopologyCanvas
-        key={JSON.stringify([view.group, model])}
-        graph={graph}
-        view={graphView}
-        inDialog
-        singleModel={!!model}
-        viewports={viewports.current}
-      />
+    <div className='flex min-h-0 flex-1 flex-col gap-3 md:flex-row'>
+      <div className='min-h-[180px] min-w-0 flex-1'>
+        <TopologyCanvas
+          key={JSON.stringify([view.group, model])}
+          graph={graph}
+          view={graphView}
+          inDialog
+          singleModel={!!model}
+          viewports={viewports.current}
+        />
+      </div>
+      {model && nodeSelection && (
+        <TopologyDetails
+          inline
+          selection={nodeSelection}
+          view={view}
+          onClose={() => {
+            setNodeSelection(null)
+            view.setSelection({ kind: 'model', model })
+            requestAnimationFrame(() => {
+              if (nodeFocus.current?.isConnected) nodeFocus.current.focus()
+            })
+          }}
+        />
+      )}
     </div>
   )
   if (model && view.detailLoading.has(model)) content = <LoadingState />
@@ -97,6 +125,7 @@ export function TopologyGraphDialog(props: {
       onOpenChange={(open) => {
         if (!open) {
           setFullScreen(false)
+          setNodeSelection(null)
           props.onClose()
         }
       }}

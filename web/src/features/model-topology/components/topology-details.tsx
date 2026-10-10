@@ -29,11 +29,13 @@ export function TopologyDetails(props: {
   onClose: () => void
   onViewModelGraph?: () => void
   children?: ReactNode
+  inline?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const focus = useRef<HTMLElement | null>(null)
   if (
+    !props.inline &&
     props.selection &&
     document.activeElement instanceof HTMLElement &&
     !document.activeElement.closest('[role="dialog"]')
@@ -64,6 +66,162 @@ export function TopologyDetails(props: {
         }))
     : []
   const sharedChannel = related.find((r) => r.channel)?.channel
+  const body = (
+    <div className='flex-1 space-y-5 overflow-auto p-5'>
+      {selected?.kind === 'group' && (
+        <>
+          <p>
+            {t('Sources')}: {props.view.groupInfo?.sources.join(', ')}
+          </p>
+          {props.view.groupInfo?.diagnostics.map((d) => (
+            <p key={`${d.code}:${d.affected_channel_id ?? 0}`}>
+              {topologyDiagnosticLabel(d.code, t)}
+            </p>
+          ))}
+        </>
+      )}
+      {summary && (
+        <dl className='grid grid-cols-2 gap-2 text-sm'>
+          <dt>{t('Configured channels')}</dt>
+          <dd>{formatNumber(summary.configured_channels, locale)}</dd>
+          <dt>{t('Enabled channels')}</dt>
+          <dd>{formatNumber(summary.enabled_channels, locale)}</dd>
+          <dt>{t('Priority layers')}</dt>
+          <dd>{formatNumber(summary.priority_layers, locale)}</dd>
+        </dl>
+      )}
+      {selected?.model && props.onViewModelGraph && (
+        <Button onClick={props.onViewModelGraph}>
+          {t('View model chain')}
+        </Button>
+      )}
+      {selected?.model && props.view.detailLoading.has(selected.model) && (
+        <LoadingState inline />
+      )}
+      {selected?.model && props.view.detailErrors.has(selected.model) && (
+        <ErrorState
+          onRetry={() => props.view.retryDetail(selected.model ?? '')}
+        />
+      )}
+      {channels.map((ch) => (
+        <section
+          key={ch.channel_id}
+          className='space-y-2 rounded-lg border p-4'
+        >
+          <h3 className='font-medium break-all'>
+            #{formatNumber(ch.channel_id, locale)} {ch.channel_name}
+          </h3>
+          <p className='text-sm'>
+            {ch.channel_status === 1
+              ? t('Enabled')
+              : t('Excluded from ordinary selection')}{' '}
+            · {t('Channel type')}: {formatNumber(ch.channel_type, locale)}
+          </p>
+          <p>
+            {t('Priority {{value}}', {
+              value: formatNumber(ch.priority, locale),
+            })}{' '}
+            · {t('Raw weight')}: {formatNumber(ch.configured_weight, locale)}
+          </p>
+          <p className='font-mono text-sm break-all'>
+            {ch.mapping.names.join(' → ')}
+          </p>
+          {ch.diagnostics.map((d) => (
+            <p
+              key={`${d.code}:${d.affected_channel_id ?? 0}`}
+              className='text-sm'
+            >
+              {topologyDiagnosticLabel(d.code, t)}
+            </p>
+          ))}
+        </section>
+      ))}
+      {selected?.kind === 'channel' && !selected.model && (
+        <>
+          <p>
+            #{formatNumber(selected.channelId, locale)} ·{' '}
+            {sharedChannel?.channel_status === 1 ? t('Enabled') : t('Disabled')}{' '}
+            · {t('Channel type')}:{' '}
+            {formatNumber(sharedChannel?.channel_type, locale)}
+          </p>
+          <p>
+            {t('{{loaded}} loaded / {{total}} related models', {
+              loaded: formatNumber(related.length, locale),
+              total: formatNumber(
+                sharedChannel?.related_model_count_in_group,
+                locale
+              ),
+            })}
+          </p>
+          {related.map((r) => (
+            <Button
+              key={r.model}
+              variant='outline'
+              className='h-auto w-full justify-start text-left break-all whitespace-normal'
+              onClick={() =>
+                props.view.setSelection({
+                  kind: 'relation',
+                  model: r.model,
+                  channelId: selected.channelId,
+                })
+              }
+            >
+              {r.model}
+              {r.channel ? ` · ${r.channel.mapping.names.join(' → ')}` : ''}
+            </Button>
+          ))}
+          <Button
+            variant='outline'
+            onClick={() => {
+              props.view.onSearchChange({
+                tChannelId: selected.channelId,
+                tModel: undefined,
+              })
+              props.onClose()
+            }}
+          >
+            {t('Filter models by this channel')}
+          </Button>
+        </>
+      )}
+      {summary?.diagnostics.map((d) => (
+        <p className='text-sm' key={`${d.code}:${d.affected_channel_id ?? 0}`}>
+          {topologyDiagnosticLabel(d.code, t)}
+          {d.affected_channel_id
+            ? ` #${formatNumber(d.affected_channel_id, locale)}`
+            : ''}
+        </p>
+      ))}
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Priority and raw weight describe configuration, not hit probability. Pinned channels, affinity, endpoints, model matching, plugins, auto groups and user or token limits may change selection.'
+        )}
+      </p>
+      {detail && (
+        <p className='text-muted-foreground text-xs break-all'>
+          {t('Observed at')}: {detail.observed_at}
+        </p>
+      )}
+    </div>
+  )
+  if (props.inline) {
+    return (
+      <aside
+        aria-label={t('Details')}
+        className='bg-background flex max-h-[40%] min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border md:max-h-none md:w-80'
+      >
+        <div className='flex items-start justify-between gap-2 border-b p-3'>
+          <h3 className='min-w-0 font-medium break-all'>
+            {selected?.model ?? sharedChannel?.channel_name ?? props.view.group}
+          </h3>
+          <Button variant='ghost' size='sm' onClick={props.onClose}>
+            {t('Close')}
+          </Button>
+        </div>
+        {body}
+      </aside>
+    )
+  }
   return (
     <Sheet
       open={!!selected}
@@ -83,148 +241,7 @@ export function TopologyDetails(props: {
             {t('Configuration topology')} · {t('Channel mapping only')}
           </SheetDescription>
         </SheetHeader>
-        <div className='flex-1 space-y-5 overflow-auto p-5'>
-          {selected?.kind === 'group' && (
-            <>
-              <p>
-                {t('Sources')}: {props.view.groupInfo?.sources.join(', ')}
-              </p>
-              {props.view.groupInfo?.diagnostics.map((d) => (
-                <p key={`${d.code}:${d.affected_channel_id ?? 0}`}>
-                  {topologyDiagnosticLabel(d.code, t)}
-                </p>
-              ))}
-            </>
-          )}
-          {summary && (
-            <dl className='grid grid-cols-2 gap-2 text-sm'>
-              <dt>{t('Configured channels')}</dt>
-              <dd>{formatNumber(summary.configured_channels, locale)}</dd>
-              <dt>{t('Enabled channels')}</dt>
-              <dd>{formatNumber(summary.enabled_channels, locale)}</dd>
-              <dt>{t('Priority layers')}</dt>
-              <dd>{formatNumber(summary.priority_layers, locale)}</dd>
-            </dl>
-          )}
-          {selected?.model && props.onViewModelGraph && (
-            <Button onClick={props.onViewModelGraph}>
-              {t('View model chain')}
-            </Button>
-          )}
-          {selected?.model && props.view.detailLoading.has(selected.model) && (
-            <LoadingState inline />
-          )}
-          {selected?.model && props.view.detailErrors.has(selected.model) && (
-            <ErrorState
-              onRetry={() => props.view.retryDetail(selected.model ?? '')}
-            />
-          )}
-          {channels.map((ch) => (
-            <section
-              key={ch.channel_id}
-              className='space-y-2 rounded-lg border p-4'
-            >
-              <h3 className='font-medium break-all'>
-                #{formatNumber(ch.channel_id, locale)} {ch.channel_name}
-              </h3>
-              <p className='text-sm'>
-                {ch.channel_status === 1
-                  ? t('Enabled')
-                  : t('Excluded from ordinary selection')}{' '}
-                · {t('Channel type')}: {formatNumber(ch.channel_type, locale)}
-              </p>
-              <p>
-                {t('Priority {{value}}', {
-                  value: formatNumber(ch.priority, locale),
-                })}{' '}
-                · {t('Raw weight')}:{' '}
-                {formatNumber(ch.configured_weight, locale)}
-              </p>
-              <p className='font-mono text-sm break-all'>
-                {ch.mapping.names.join(' → ')}
-              </p>
-              {ch.diagnostics.map((d) => (
-                <p
-                  key={`${d.code}:${d.affected_channel_id ?? 0}`}
-                  className='text-sm'
-                >
-                  {topologyDiagnosticLabel(d.code, t)}
-                </p>
-              ))}
-            </section>
-          ))}
-          {selected?.kind === 'channel' && !selected.model && (
-            <>
-              <p>
-                #{formatNumber(selected.channelId, locale)} ·{' '}
-                {sharedChannel?.channel_status === 1
-                  ? t('Enabled')
-                  : t('Disabled')}{' '}
-                · {t('Channel type')}:{' '}
-                {formatNumber(sharedChannel?.channel_type, locale)}
-              </p>
-              <p>
-                {t('{{loaded}} loaded / {{total}} related models', {
-                  loaded: formatNumber(related.length, locale),
-                  total: formatNumber(
-                    sharedChannel?.related_model_count_in_group,
-                    locale
-                  ),
-                })}
-              </p>
-              {related.map((r) => (
-                <Button
-                  key={r.model}
-                  variant='outline'
-                  className='h-auto w-full justify-start text-left break-all whitespace-normal'
-                  onClick={() =>
-                    props.view.setSelection({
-                      kind: 'relation',
-                      model: r.model,
-                      channelId: selected.channelId,
-                    })
-                  }
-                >
-                  {r.model}
-                  {r.channel ? ` · ${r.channel.mapping.names.join(' → ')}` : ''}
-                </Button>
-              ))}
-              <Button
-                variant='outline'
-                onClick={() => {
-                  props.view.onSearchChange({
-                    tChannelId: selected.channelId,
-                    tModel: undefined,
-                  })
-                  props.onClose()
-                }}
-              >
-                {t('Filter models by this channel')}
-              </Button>
-            </>
-          )}
-          {summary?.diagnostics.map((d) => (
-            <p
-              className='text-sm'
-              key={`${d.code}:${d.affected_channel_id ?? 0}`}
-            >
-              {topologyDiagnosticLabel(d.code, t)}
-              {d.affected_channel_id
-                ? ` #${formatNumber(d.affected_channel_id, locale)}`
-                : ''}
-            </p>
-          ))}
-          <p className='text-muted-foreground text-xs'>
-            {t(
-              'Priority and raw weight describe configuration, not hit probability. Pinned channels, affinity, endpoints, model matching, plugins, auto groups and user or token limits may change selection.'
-            )}
-          </p>
-          {detail && (
-            <p className='text-muted-foreground text-xs break-all'>
-              {t('Observed at')}: {detail.observed_at}
-            </p>
-          )}
-        </div>
+        {body}
         {props.children}
       </SheetContent>
     </Sheet>

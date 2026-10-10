@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
   cleanup,
 } from '@testing-library/react'
 import i18n from 'i18next'
@@ -26,6 +27,7 @@ afterEach(async () => {
   cleanup()
   useAuthStore.getState().auth.setUser(null)
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 function Page() {
   const [search, setSearch] = useState<TopologySearch>({ tGroup: 'g' })
@@ -47,6 +49,32 @@ function mount() {
   )
 }
 it('adds the topology section, defaults to the list and opens only the selected model graph above its details', async () => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        if (target.classList.contains('react-flow__node')) {
+          queueMicrotask(() =>
+            this.callback(
+              [{ target } as ResizeObserverEntry],
+              this as unknown as ResizeObserver
+            )
+          )
+        }
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+  vi.stubGlobal(
+    'DOMMatrixReadOnly',
+    class {
+      m22 = 1
+    }
+  )
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1200)
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(700)
   useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.endsWith('groups')) {
@@ -106,6 +134,23 @@ it('adds the topology section, defaults to the list and opens only the selected 
     screen.queryByRole('button', { name: 'Collapse model' })
   ).not.toBeInTheDocument()
   expect(document.querySelectorAll('[data-id*="B"]')).toHaveLength(0)
+  const channelNode = await screen.findByRole('button', { name: 'Shared' })
+  channelNode.focus()
+  fireEvent.click(channelNode)
+  const panel = await screen.findByRole('complementary', { name: 'Details' })
+  expect(
+    within(panel).getByRole('heading', { name: '#7 Shared' })
+  ).toBeVisible()
+  expect(within(panel).getByText('A → X')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Full screen' }))
+  expect(within(panel).getByText('A → X')).toBeVisible()
+  fireEvent.click(within(panel).getByRole('button', { name: 'Close' }))
+  expect(
+    screen.queryByRole('complementary', { name: 'Details' })
+  ).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Model topology canvas')).toBeVisible()
+  await waitFor(() => expect(channelNode).toHaveFocus())
+
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
   expect(

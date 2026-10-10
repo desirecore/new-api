@@ -222,3 +222,10 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 验证：`bun run typecheck` 通过；限定修改文件 oxlint 无错误（原有 getElementById 警告保留）；`bun run test src/features/model-topology src/features/models src/components/ai-elements/__tests__ src/lib/__tests__/format.test.ts`：16 文件、98 测试通过；`bun run build` 通过。新增文案覆盖七种语言并执行 i18n:sync。
 
 本地验收：使用既有脱敏快照启动 localhost:23930，浏览器验证 default 分组列表、mimo-v2.5-pro 的五渠道/优先级/映射图、全屏和 Escape 返回详情；关闭图后 URL 为 tMode=table 且保留 tModel，焦点返回“查看模型链路”按钮。服务升级保留 test.db 和本地管理员账号。
+
+
+## 2026-10-11 节点详情被链路弹窗遮挡修复
+
+原因：单模型图更新了底层模型抽屉选择，却未在前台弹窗渲染节点详情。复用 TopologyDetails 的内容，增加内嵌展示方式，在图弹窗内显示节点详情；桌面并排，窄屏上下排列，详情独立滚动。关闭面板保留图并恢复节点焦点，图关闭仍回到原模型抽屉。无新增依赖、翻译键或后端变更。
+
+先增加节点点击后详情在可访问面板内可见的失败用例，修复后 `bun run test src/features/model-topology`（7 文件、23 测试）、`bun run typecheck`、限定 feature 的 oxlint（无错误，原有 getElementById 警告保留）及 `bun run build` 均通过。浏览器验证 default / mimo-v2.5-pro / 潞晨科技节点的映射和优先级在弹窗内可见，全屏仍可查看；390×844 窄屏详情在画布下方，内容 overflow:auto 且可滚动；关闭详情保留链路图。本地 23930 服务已更新，保留既有脱敏数据库。
