@@ -54,7 +54,7 @@ export function TopologyNode(props: NodeProps<Node<TopologyNodeData>>) {
           )}
         </Button>
         <div className='flex items-center justify-between gap-1 text-xs'>
-          {d.kind === 'model' ? (
+          {d.kind === 'model' && d.onExpand ? (
             <Button
               variant='outline'
               size='xs'

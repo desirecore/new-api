@@ -30,7 +30,7 @@ import { useAuthStore } from '@/stores/auth-store'
 const modelsSearchSchema = z.object({
   tGroup: z.string().optional(),
   tModel: z.string().optional(),
-  tMode: z.enum(['tree', 'network', 'table']).optional().catch('tree'),
+  tMode: z.enum(['tree', 'network', 'table']).optional().catch('table'),
   tSearch: z.string().optional(),
   tChannel: z.string().optional(),
   tChannelId: z.number().int().positive().optional().catch(undefined),

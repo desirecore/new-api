@@ -213,3 +213,12 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 延期的小项：分组选择器目前显示名称及 auto 说明，尚不显示模型数、启用渠道数及普通分组的异常摘要；选择分组后可查看计数与诊断。此项保留为后续体验优化，不将当前实现描述为已完成选择器摘要。
 
 范围裁定维持设计：历史访问/账单指标留在第二交付；真实请求决策、多实例实时缓存、用户/Token 的 auto 展开不在首版；provider adaptor/plugin 的额外名称改写不从渠道映射推断。相应限制已在页面及详情提示。
+
+
+## 模型列表与按需链路图交互调整
+
+用户确认将默认全分组树改为分组模型列表。复用 StaticDataTable、TopologyDetails 抽屉及 `@/components/dialog` 业务弹窗；新增业务图弹窗仅组合原有图构建器和 Canvas，不新增通用弹窗实现。单模型图限制模型范围，分组共享网络改为次级入口。关闭图保留模型详情和列表状态，保留已有 URL 参数契约；后端 API、转发及数据结构未变更。
+
+验证：`bun run typecheck` 通过；限定修改文件 oxlint 无错误（原有 getElementById 警告保留）；`bun run test src/features/model-topology src/features/models src/components/ai-elements/__tests__ src/lib/__tests__/format.test.ts`：16 文件、98 测试通过；`bun run build` 通过。新增文案覆盖七种语言并执行 i18n:sync。
+
+本地验收：使用既有脱敏快照启动 localhost:23930，浏览器验证 default 分组列表、mimo-v2.5-pro 的五渠道/优先级/映射图、全屏和 Escape 返回详情；关闭图后 URL 为 tMode=table 且保留 tModel，焦点返回“查看模型链路”按钮。服务升级保留 test.db 和本地管理员账号。

@@ -138,7 +138,7 @@ export function useTopologyView(input: TopologyViewInput) {
       ? modelsQuery.data.pages[0].items[0]?.name
       : undefined
   useEffect(() => {
-    if (singletonName) {
+    if (singletonName && input.search.tMode && input.search.tMode !== 'table') {
       setLocal((prev) =>
         prev.group === scope && prev.expanded.has(singletonName)
           ? prev
@@ -150,7 +150,7 @@ export function useTopologyView(input: TopologyViewInput) {
             }
       )
     }
-  }, [scope, singletonName, input.search.tModel])
+  }, [scope, singletonName, input.search.tModel, input.search.tMode])
   function expandModel(name: string) {
     setLocal((prev) => {
       const current = prev.group === scope ? prev : active
@@ -202,7 +202,7 @@ export function useTopologyView(input: TopologyViewInput) {
     details,
     expandedModels: expanded,
     selection,
-    mode: input.search.tMode ?? 'tree',
+    mode: input.search.tMode ?? 'table',
     total: modelsQuery.data?.pages[0]?.total ?? 0,
     groupTotal: modelsQuery.data?.pages[0]?.group_total ?? 0,
     observedAt: modelsQuery.data?.pages[0]?.observed_at,

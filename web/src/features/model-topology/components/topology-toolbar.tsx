@@ -11,7 +11,6 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDebounce } from '@/hooks/use-debounce'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
@@ -87,6 +86,7 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
           onGroupChange={(tGroup) =>
             view.onSearchChange({
               tGroup,
+              tMode: 'table',
               tModel: undefined,
               tSearch: undefined,
               tChannel: undefined,
@@ -203,20 +203,14 @@ export function TopologyToolbar(props: { view: TopologyViewState }) {
         </Button>
       </div>
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Tabs
-          value={view.mode}
-          onValueChange={(value) =>
-            view.onSearchChange({ tMode: value as TopologySearch['tMode'] })
+        <Button
+          variant='outline'
+          onClick={() =>
+            view.onSearchChange({ tMode: 'network', tModel: undefined })
           }
         >
-          <TabsList>
-            <TabsTrigger value='tree'>{t('Model chain tree')}</TabsTrigger>
-            <TabsTrigger value='network'>
-              {t('Shared channel network')}
-            </TabsTrigger>
-            <TabsTrigger value='table'>{t('Table')}</TabsTrigger>
-          </TabsList>
-        </Tabs>
+          {t('Group relationship overview')}
+        </Button>
         <p role='status' className='text-muted-foreground text-xs'>
           {t(
             '{{loaded}} loaded / {{matched}} matched / {{total}} group models',

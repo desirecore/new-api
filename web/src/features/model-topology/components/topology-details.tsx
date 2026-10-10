@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -27,6 +27,8 @@ export function TopologyDetails(props: {
   selection: TopologySelection | null
   view: TopologyViewState
   onClose: () => void
+  onViewModelGraph?: () => void
+  children?: ReactNode
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -103,6 +105,11 @@ export function TopologyDetails(props: {
               <dt>{t('Priority layers')}</dt>
               <dd>{formatNumber(summary.priority_layers, locale)}</dd>
             </dl>
+          )}
+          {selected?.model && props.onViewModelGraph && (
+            <Button onClick={props.onViewModelGraph}>
+              {t('View model chain')}
+            </Button>
           )}
           {selected?.model && props.view.detailLoading.has(selected.model) && (
             <LoadingState inline />
@@ -218,6 +225,7 @@ export function TopologyDetails(props: {
             </p>
           )}
         </div>
+        {props.children}
       </SheetContent>
     </Sheet>
   )

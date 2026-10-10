@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -245,7 +245,7 @@ it.each(['constructor', 'toString', '__proto__'])(
   }
 )
 
-it('keeps the table model expanded after selecting it in the same event', async () => {
+it('loads selected table model details without expanding inline channels', async () => {
   vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
     if (url.endsWith('groups')) return { data: { success: true, data: [] } }
     if (url.endsWith('models')) {
@@ -265,18 +265,24 @@ it('keeps the table model expanded after selecting it in the same event', async 
     return { data: { success: true, data: detail(config?.params.model, 'X') } }
   })
   function Table() {
+    const [search, setSearch] = useState({ tGroup: 'g' })
     const view = useTopologyView({
-      search: { tGroup: 'g' },
-      onSearchChange: () => {},
+      search,
+      onSearchChange: (next) => setSearch((prev) => ({ ...prev, ...next })),
     })
     return <TopologyTable view={view} />
   }
   render(<Table />, { wrapper: wrapper() })
   fireEvent.click(await screen.findByRole('button', { name: 'A' }))
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute(
-      'aria-expanded',
-      'true'
+    expect(api.get).toHaveBeenCalledWith(
+      expect.stringContaining('detail'),
+      expect.objectContaining({
+        params: expect.objectContaining({ model: 'A' }),
+      })
     )
   )
+  expect(
+    screen.queryByRole('button', { name: 'Collapse' })
+  ).not.toBeInTheDocument()
 })

@@ -46,7 +46,7 @@ function mount() {
     </QueryClientProvider>
   )
 }
-it('adds the topology section, defaults to a tree and preserves selection across table and network modes', async () => {
+it('adds the topology section, defaults to the list and opens only the selected model graph above its details', async () => {
   useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.endsWith('groups')) {
@@ -92,24 +92,37 @@ it('adds the topology section, defaults to a tree and preserves selection across
     'deployments',
     'topology',
   ])
-  await waitFor(() =>
-    expect(
-      screen.getByRole('tab', { name: 'Model chain tree' })
-    ).toHaveAttribute('aria-selected', 'true')
-  )
-  fireEvent.click(screen.getByRole('tab', { name: 'Table' }))
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'A' })).toBeInTheDocument()
-  )
-  fireEvent.click(screen.getByRole('button', { name: 'A' }))
-  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-  fireEvent.click(screen.getByRole('tab', { name: 'Shared channel network' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'A' }))
+  await screen.findByRole('button', { name: 'View model chain' })
   expect(
-    screen.getByRole('tab', { name: 'Shared channel network' })
-  ).toHaveAttribute('aria-selected', 'true')
-  fireEvent.click(screen.getByRole('tab', { name: 'Table' }))
+    screen.queryByLabelText('Model topology canvas')
+  ).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'View model chain' }))
+  await waitFor(() =>
+    expect(screen.getAllByRole('dialog', { hidden: true })).toHaveLength(2)
+  )
+  expect(screen.getByLabelText('Model topology canvas')).toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: 'Collapse model' })
+  ).not.toBeInTheDocument()
+  expect(document.querySelectorAll('[data-id*="B"]')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
+  expect(
+    screen.getByRole('button', { name: 'View model chain' })
+  ).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
   expect(screen.getByRole('table')).toBeInTheDocument()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Group relationship overview' })
+  )
+  await screen.findByLabelText('Model topology canvas')
+  expect(screen.getByRole('dialog')).toHaveAccessibleName(
+    'Group relationship overview'
+  )
 })
 it('does not request or show topology for an admin denied channel read', () => {
   useAuthStore.getState().auth.setUser({
@@ -143,10 +156,14 @@ it('updates topology controls and formatted counts when switching Chinese locale
     expect(screen.getByText(/1,234 group models/)).toBeInTheDocument()
   )
   await act(() => i18n.changeLanguage('zhCN'))
-  expect(screen.getByRole('tab', { name: '模型链路树' })).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: '分组关系总览' })
+  ).toBeInTheDocument()
   expect(screen.getByText(/分组共 1,234 个模型/)).toBeInTheDocument()
   await act(() => i18n.changeLanguage('zhTW'))
-  expect(screen.getByRole('tab', { name: '模型鏈路樹' })).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: '分組關係總覽' })
+  ).toBeInTheDocument()
   expect(screen.getByText(/分組共 1,234 個模型/)).toBeInTheDocument()
 })
 

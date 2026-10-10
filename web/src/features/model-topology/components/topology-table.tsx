@@ -6,7 +6,6 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 
 import type { TopologyViewState } from '../hooks/use-topology-view'
-import { topologyChannels } from '../lib/graph'
 import { topologyDiagnosticLabel } from '../lib/labels'
 
 export function TopologyTable(props: { view: TopologyViewState }) {
@@ -26,7 +25,6 @@ export function TopologyTable(props: { view: TopologyViewState }) {
                 variant='link'
                 className='h-auto text-left break-all whitespace-normal'
                 onClick={() => {
-                  props.view.expandModel(m.name)
                   props.view.setSelection({ kind: 'model', model: m.name })
                 }}
               >
@@ -54,66 +52,22 @@ export function TopologyTable(props: { view: TopologyViewState }) {
                 .join(' · '),
           },
           {
-            id: 'expand',
-            header: t('Model chain'),
+            id: 'details',
+            header: t('Details'),
             cell: (m) => (
               <Button
                 size='sm'
                 variant='outline'
-                aria-expanded={props.view.expandedModels.has(m.name)}
                 onClick={() =>
-                  props.view.expandedModels.has(m.name)
-                    ? props.view.collapseModel(m.name)
-                    : props.view.expandModel(m.name)
+                  props.view.setSelection({ kind: 'model', model: m.name })
                 }
               >
-                {props.view.expandedModels.has(m.name)
-                  ? t('Collapse')
-                  : t('Expand')}
+                {t('View details')}
               </Button>
             ),
           },
         ]}
       />
-      {props.view.models
-        .filter((m) => props.view.expandedModels.has(m.name))
-        .map((m) => (
-          <section className='space-y-2 rounded-lg border p-4' key={m.name}>
-            <h3 className='font-medium break-all'>{m.name}</h3>
-            {props.view.detailLoading.has(m.name) && (
-              <p role='status'>{t('Loading...')}</p>
-            )}
-            {props.view.detailErrors.has(m.name) && (
-              <Button onClick={() => props.view.retryDetail(m.name)}>
-                {t('Retry')}
-              </Button>
-            )}
-            {props.view.details[m.name] &&
-              topologyChannels(props.view.details[m.name]).map((ch) => (
-                <Button
-                  variant='outline'
-                  className='h-auto w-full justify-start text-left break-all whitespace-normal'
-                  key={ch.channel_id}
-                  onClick={() =>
-                    props.view.setSelection({
-                      kind: 'relation',
-                      model: m.name,
-                      channelId: ch.channel_id,
-                    })
-                  }
-                >
-                  #{formatNumber(ch.channel_id, locale)} {ch.channel_name} ·{' '}
-                  {ch.channel_status === 1 ? t('Enabled') : t('Disabled')} ·{' '}
-                  {t('Priority {{value}}', {
-                    value: formatNumber(ch.priority, locale),
-                  })}{' '}
-                  · {t('Raw weight')}:{' '}
-                  {formatNumber(ch.configured_weight, locale)} ·{' '}
-                  {ch.mapping.names.join(' → ')}
-                </Button>
-              ))}
-          </section>
-        ))}
     </div>
   )
 }

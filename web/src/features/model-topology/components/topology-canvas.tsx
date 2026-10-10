@@ -21,6 +21,8 @@ import { TopologyNode } from './topology-node'
 const nodeTypes = { topology: TopologyNode }
 export function TopologyCanvas(props: {
   graph: TopologyGraph
+  inDialog?: boolean
+  singleModel?: boolean
   view: TopologyViewState
   viewports?: Map<string, Viewport>
 }) {
@@ -32,6 +34,8 @@ export function TopologyCanvas(props: {
 }
 function TopologyCanvasContent(props: {
   graph: TopologyGraph
+  inDialog?: boolean
+  singleModel?: boolean
   view: TopologyViewState
   viewports?: Map<string, Viewport>
 }) {
@@ -124,24 +128,26 @@ function TopologyCanvasContent(props: {
             channelId: node.data.channelId,
             nodeId: node.id,
           }),
-        onExpand: () => {
-          const name = node.data.model
-          if (!name) return
-          if (props.view.detailErrors.has(name)) {
-            props.view.retryDetail(name)
-            return
-          }
-          if (props.view.expandedModels.has(name)) {
-            props.view.collapseModel(name)
-            requestAnimationFrame(() =>
-              document.getElementById(`topology-focus-${node.id}`)?.focus()
-            )
-          } else props.view.expandModel(name)
-        },
+        onExpand: props.singleModel
+          ? undefined
+          : () => {
+              const name = node.data.model
+              if (!name) return
+              if (props.view.detailErrors.has(name)) {
+                props.view.retryDetail(name)
+                return
+              }
+              if (props.view.expandedModels.has(name)) {
+                props.view.collapseModel(name)
+                requestAnimationFrame(() =>
+                  document.getElementById(`topology-focus-${node.id}`)?.focus()
+                )
+              } else props.view.expandModel(name)
+            },
       },
     }))
     return { nodes, edges }
-  }, [props.graph, props.view, selected, t, locale])
+  }, [props.graph, props.view, props.singleModel, selected, t, locale])
   function locate() {
     const node =
       graph.nodes.find((n) => n.id === selected?.nodeId) ||
@@ -170,19 +176,29 @@ function TopologyCanvasContent(props: {
         >
           {t('Locate selection')}
         </Button>
-        <Button size='sm' variant='outline' onClick={props.view.expandAll}>
-          {t('Expand loaded models')}
-        </Button>
-        <Button size='sm' variant='outline' onClick={props.view.collapseAll}>
-          {t('Collapse all')}
-        </Button>
-        <Button
-          size='sm'
-          variant='outline'
-          onClick={() => setFullScreen(!fullScreen)}
-        >
-          {fullScreen ? t('Exit full screen') : t('Full screen')}
-        </Button>
+        {!props.singleModel && (
+          <>
+            <Button size='sm' variant='outline' onClick={props.view.expandAll}>
+              {t('Expand loaded models')}
+            </Button>
+            <Button
+              size='sm'
+              variant='outline'
+              onClick={props.view.collapseAll}
+            >
+              {t('Collapse all')}
+            </Button>
+          </>
+        )}
+        {!props.inDialog && (
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={() => setFullScreen(!fullScreen)}
+          >
+            {fullScreen ? t('Exit full screen') : t('Full screen')}
+          </Button>
+        )}
       </div>
       <Canvas
         key={key}
@@ -197,7 +213,9 @@ function TopologyCanvasContent(props: {
             requestAnimationFrame(
               () =>
                 void instance.fitView({
-                  nodes: graph.nodes.slice(0, 2),
+                  nodes: props.singleModel
+                    ? graph.nodes
+                    : graph.nodes.slice(0, 2),
                   padding: 0.4,
                   maxZoom: 1,
                 })
