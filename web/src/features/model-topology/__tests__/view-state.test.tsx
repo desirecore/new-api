@@ -1,10 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
+import { TopologyTable } from '../components/topology-table'
 import { useTopologyView } from '../hooks/use-topology-view'
 import type { TopologySearch } from '../types'
 import { detail, summary } from './fixtures'
@@ -191,4 +199,84 @@ it('restores the model from a changed URL instead of retaining an old local sele
   )
   rerender({ tGroup: 'g', tModel: 'B' })
   expect(result.current.selection?.model).toBe('B')
+})
+
+it.each(['constructor', 'toString', '__proto__'])(
+  'restores the literal model name %s while its detail is pending',
+  async (name) => {
+    let resolveDetail: (v: unknown) => void = () => {}
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url.endsWith('groups')) return { data: { success: true, data: [] } }
+      if (url.endsWith('models')) {
+        return {
+          data: {
+            success: true,
+            data: {
+              items: [summary(name), summary('B')],
+              total: 2,
+              group_total: 2,
+              page: 1,
+              page_size: 50,
+            },
+          },
+        }
+      }
+      return new Promise((resolve) => {
+        resolveDetail = resolve
+      })
+    })
+    const { result } = renderHook(
+      () =>
+        useTopologyView({
+          search: { tGroup: 'g', tModel: name },
+          onSearchChange: () => {},
+        }),
+      { wrapper: wrapper() }
+    )
+    expect(result.current.models).toEqual([])
+    await waitFor(() =>
+      expect(result.current.models).toEqual([summary(name), summary('B')])
+    )
+    expect(result.current.details[name]).toBeUndefined()
+    act(() =>
+      resolveDetail({ data: { success: true, data: detail(name, 'X') } })
+    )
+    await waitFor(() => expect(result.current.details[name]?.model).toBe(name))
+  }
+)
+
+it('keeps the table model expanded after selecting it in the same event', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
+    if (url.endsWith('groups')) return { data: { success: true, data: [] } }
+    if (url.endsWith('models')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            items: [summary('A'), summary('B')],
+            total: 2,
+            group_total: 2,
+            page: 1,
+            page_size: 50,
+          },
+        },
+      }
+    }
+    return { data: { success: true, data: detail(config?.params.model, 'X') } }
+  })
+  function Table() {
+    const view = useTopologyView({
+      search: { tGroup: 'g' },
+      onSearchChange: () => {},
+    })
+    return <TopologyTable view={view} />
+  }
+  render(<Table />, { wrapper: wrapper() })
+  fireEvent.click(await screen.findByRole('button', { name: 'A' }))
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  )
 })

@@ -87,3 +87,26 @@ it('counts omitted nodes explicitly at the 300-node budget and keeps disabled ch
     complete.edges.find((e) => e.data?.channelId === 999)?.data?.disabled
   ).toBe(true)
 })
+
+it('retains the configured priority on a disabled network relationship', () => {
+  const d = detail('A', 'X')
+  d.excluded_channels = [
+    {
+      ...d.tiers[0].channels[0],
+      channel_id: 9,
+      channel_status: 2,
+      priority: 100,
+    },
+  ]
+  const graph = buildTopologyGraph({
+    group: 'g',
+    models: [summary('A')],
+    detailsByModel: { A: d },
+    expandedModels: new Set(['A']),
+    visibleBudget: 300,
+    mode: 'network',
+  })
+  expect(graph.edges.find((e) => e.data?.channelId === 9)?.data?.priority).toBe(
+    100
+  )
+})

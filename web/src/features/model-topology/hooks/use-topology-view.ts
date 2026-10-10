@@ -112,7 +112,7 @@ export function useTopologyView(input: TopologyViewInput) {
     }
   })
   const results = useQueries({ queries })
-  const details: Record<string, TopologyDetail> = {}
+  const details = Object.create(null) as Record<string, TopologyDetail>
   const detailErrors = new Set<string>()
   const detailLoading = new Set<string>()
   for (const [index, result] of results.entries()) {
@@ -152,7 +152,10 @@ export function useTopologyView(input: TopologyViewInput) {
     }
   }, [scope, singletonName, input.search.tModel])
   function expandModel(name: string) {
-    setLocal({ ...active, expanded: new Set([...expanded, name]) })
+    setLocal((prev) => {
+      const current = prev.group === scope ? prev : active
+      return { ...current, expanded: new Set([...current.expanded, name]) }
+    })
   }
   function collapseModel(name: string) {
     const next = new Set(expanded)
@@ -170,7 +173,10 @@ export function useTopologyView(input: TopologyViewInput) {
     }
   }
   function setSelection(next: TopologySelection | null) {
-    setLocal({ ...active, selection: next, urlModel: next?.model })
+    setLocal((prev) => {
+      const current = prev.group === scope ? prev : active
+      return { ...current, selection: next, urlModel: next?.model }
+    })
     input.onSearchChange({ tModel: next?.model })
   }
   function collapseAll() {

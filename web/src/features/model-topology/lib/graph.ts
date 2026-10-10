@@ -110,7 +110,7 @@ export function buildTopologyGraph(input: TopologyGraphInput): TopologyGraph {
           model: model.name,
           channelId: ch.channel_id,
           mapping: ch.mapping,
-          priority: tier.priority,
+          priority: ch.priority,
           weight: ch.configured_weight,
           disabled: ch.channel_status !== 1,
         }
