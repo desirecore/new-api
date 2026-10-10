@@ -1,6 +1,6 @@
 # Group Model Routing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 实现以分组为入口的交互式模型配置链路图，支持模型链路树、共享渠道网络与辅助表格。
 
@@ -69,11 +69,11 @@
 - 来源并集保留仅 abilities 引用的分组；没有渠道配置的能力记录只形成诊断，不伪造渠道链路。auto 返回 special 标识及说明，无固定拓扑。
 - 公共可匹配错误 `ErrTopologyNotFound` 用于无分组/模型；映射异常留给任务 2，不能作为整页 error。
 
-- [ ] 在集中测试文件使用现有 `modelManagementDB(t, dialect, dsn)` 与 require/assert，编写 `TestModelTopologyDatabaseMatrix`：空组保留、未登记组保留、跨组隔离、未入库/隐藏模型仍出现、禁用渠道计数、能力不一致诊断、分页上限 100、字面搜索 `%`、模型名含 `/`、响应无凭据。fixture 初始化并恢复分组配置，不依赖全局默认值。
-- [ ] 运行 `go test ./controller -run '^TestModelTopologyDatabaseMatrix$' -count=1 -v`，确认因接口尚未实现而失败。
-- [ ] 实现限定字段查询及上述聚合函数：按模型名稳定排序，筛选先于计数/分页；分组和模型参数精确匹配，空白原值保留诊断，不偷偷改变路由语义。只读现有数据，不调用 Insert/UpdateAbilities/InitChannelCache。
-- [ ] 运行相同测试；SQLite 子测试通过，其他引擎若未配置仍是待验证，任务 7 完成真实矩阵。
-- [ ] `gofmt` 修改 Go 文件；提交本任务生产文件与集中测试文件，提交信息 `feat: add read-only model topology queries`。
+- [x] 在集中测试文件使用现有 `modelManagementDB(t, dialect, dsn)` 与 require/assert，编写 `TestModelTopologyDatabaseMatrix`：空组保留、未登记组保留、跨组隔离、未入库/隐藏模型仍出现、禁用渠道计数、能力不一致诊断、分页上限 100、字面搜索 `%`、模型名含 `/`、响应无凭据。fixture 初始化并恢复分组配置，不依赖全局默认值。
+- [x] 运行 `go test ./controller -run '^TestModelTopologyDatabaseMatrix$' -count=1 -v`，确认因接口尚未实现而失败。
+- [x] 实现限定字段查询及上述聚合函数：按模型名稳定排序，筛选先于计数/分页；分组和模型参数精确匹配，空白原值保留诊断，不偷偷改变路由语义。只读现有数据，不调用 Insert/UpdateAbilities/InitChannelCache。
+- [x] 运行相同测试；SQLite 子测试通过，其他引擎若未配置仍是待验证，任务 7 完成真实矩阵。
+- [x] `gofmt` 修改 Go 文件；提交本任务生产文件与集中测试文件，提交信息 `feat: add read-only model topology queries`。
 
 ## Task 2: 映射详情、管理 API 与权限接入
 
@@ -85,11 +85,11 @@
 - router：`setModelTopologyRoutes(apiRouter *gin.RouterGroup)`；注册设计的 `/api/model-topology/{groups,models,detail}`，使用既有 `handlePermissionRoute` 和 `authz.ChannelRead`，不新增角色/权限种子。
 - 参数缺失或非法返回 400，资源不存在 404，无权限 403；认证失败沿用现有中间件语义；正常配置查询失败不伪造成功空列表。
 
-- [ ] 在集中测试新增 `TestModelTopologyMapping`，精确断言无映射 `[A]`、链式 `[A,B,C]`、自身映射不报循环、真实循环明确报错、非法 JSON 只影响该渠道、修饰名回退与原 helper 一致。以可控 relay helper fixture 校对行为，不复制生产函数作为预期算法。
-- [ ] 在已有 router 测试加入 `TestModelTopologyRoutesRequireChannelRead`，验证允许的管理用户、显式拒绝 ChannelRead 的管理用户和普通用户；断言拒绝响应不含渠道名及映射。
-- [ ] 运行 `go test ./controller -run 'TestModelTopology' -count=1` 与 `go test ./router -run 'TestModelTopology' -count=1`，观察新增失败。
-- [ ] 实现映射解析与路由注册；非法映射显示局部诊断，最大展示链 64 步，超限明确标识截断。无权限数据不得先聚合再靠前端隐藏。原 helper 和授权流程不改。
-- [ ] 重跑上述测试，运行 `go test ./router -run 'Test.*Channel' -count=1` 验证既有渠道授权接入未回归；gofmt 后提交 `feat: expose protected model topology API`。
+- [x] 在集中测试新增 `TestModelTopologyMapping`，精确断言无映射 `[A]`、链式 `[A,B,C]`、自身映射不报循环、真实循环明确报错、非法 JSON 只影响该渠道、修饰名回退与原 helper 一致。以可控 relay helper fixture 校对行为，不复制生产函数作为预期算法。
+- [x] 在已有 router 测试加入 `TestModelTopologyRoutesRequireChannelRead`，验证允许的管理用户、显式拒绝 ChannelRead 的管理用户和普通用户；断言拒绝响应不含渠道名及映射。
+- [x] 运行 `go test ./controller -run 'TestModelTopology' -count=1` 与 `go test ./router -run 'TestModelTopology' -count=1`，观察新增失败。
+- [x] 实现映射解析与路由注册；非法映射显示局部诊断，最大展示链 64 步，超限明确标识截断。无权限数据不得先聚合再靠前端隐藏。原 helper 和授权流程不改。
+- [x] 重跑上述测试，运行 `go test ./router -run 'Test.*Channel' -count=1` 验证既有渠道授权接入未回归；gofmt 后提交 `feat: expose protected model topology API`。
 
 ## Task 3: 前端数据契约、图投影和布局
 
@@ -101,8 +101,8 @@
 - 布局：`layoutTopologyGraph(graph: TopologyGraph, mode: 'tree' | 'network', previousPositions?: ReadonlyMap<string, { x: number; y: number }>): TopologyGraph`；稳定业务键构造 ID，禁止拼接分隔符导致名称冲突，使用结构化 tuple 编码。通过前次坐标保留无关子图锚点，因子树变大而需要让位的节点属于受影响集合。
 - 模型键 `(group, model)`；树渠道键 `(group, model, channel_id)`；网络渠道键 `(group, channel_id)`；映射节点带模型/渠道/步骤。网络映射归属保存在边数据，详情跟随所选关系。
 
-- [ ] 写图投影测试：模型 A/B 共用渠道 7，分别映射 X/Y；tree 存在两个渠道图节点，network 只有一个渠道图节点但保留两条关系，选 A 不展示 Y。另测同名不同 ID、名称含分隔符、禁用边、折叠、诊断与 300 节点预算的明确 omittedCounts。
-- [ ] 写布局测试：相同输入输出位置稳定、边从左至右、节点包围盒不重叠、同优先级并列、展开一个模型不移动无关子图的锚点。检查确定性坐标，不做耗时断言。
+- [x] 写图投影测试：模型 A/B 共用渠道 7，分别映射 X/Y；tree 存在两个渠道图节点，network 只有一个渠道图节点但保留两条关系，选 A 不展示 Y。另测同名不同 ID、名称含分隔符、禁用边、折叠、诊断与 300 节点预算的明确 omittedCounts。
+- [x] 写布局测试：相同输入输出位置稳定、边从左至右、节点包围盒不重叠、同优先级并列、展开一个模型不移动无关子图的锚点。检查确定性坐标，不做耗时断言。
 
 本任务的关键回归断言（fixture 的 A/B 共用渠道 7）：
 
@@ -116,9 +116,9 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
   .toEqual(['B', 'Y'])
 ```
 
-- [ ] 在 web 运行 `bun run test src/features/model-topology/__tests__/graph.test.ts src/features/model-topology/__tests__/layout.test.ts`，确认失败。
-- [ ] 实现上述接口与纯函数；用现有已安装 React Flow 类型，布局使用固定层和子树高度分配。将 `@xyflow/react` 原版本范围移入 dependencies，执行 `bun install` 后核对锁定版本仍为已有版本，不带入无关升级。
-- [ ] 重跑测试与 `bun run typecheck`，提交 `feat: build group model topology graphs`。
+- [x] 在 web 运行 `bun run test src/features/model-topology/__tests__/graph.test.ts src/features/model-topology/__tests__/layout.test.ts`，确认失败。
+- [x] 实现上述接口与纯函数；用现有已安装 React Flow 类型，布局使用固定层和子树高度分配。将 `@xyflow/react` 原版本范围移入 dependencies，执行 `bun install` 后核对锁定版本仍为已有版本，不带入无关升级。
+- [x] 重跑测试与 `bun run typecheck`，提交 `feat: build group model topology graphs`。
 
 ## Task 4: 查询、展开、搜索和 URL 状态
 
@@ -129,11 +129,11 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 - URL 字段独立使用 `tGroup`、`tModel`、`tMode`、`tSearch`、`tChannel`、`tStatus`、`tMapping`、`tDiagnostics`，不得覆盖现有模型/厂商/部署查询参数；非法 mode 回落 tree。
 - 查询键以 model-topology 为前缀并包含 group/model/filters；支持 AbortSignal，过期响应不得写入新组状态。详情并发上限 4，最多 50 模型/页；选择刷新期间保留旧数据并标识刷新状态。
 
-- [ ] 写受控 Promise 测试：A 组详情在切换 B 后才完成，B 图不出现 A 渠道；同模型跨组不复用错误缓存。局部详情失败只显示对应模型重试入口，其余成功详情保留。
-- [ ] 写搜索/分页/URL 测试：未加载模型可被服务端搜索找到，`org/model-a` 刷新可恢复；加载 50/120 时显示完整计数；第 51 个来自加载更多；展开当前加载集合最多 4 个并发且取消后不继续排队；空组不请求无效详情。
-- [ ] 运行 `bun run test src/features/model-topology/__tests__/view-state.test.tsx` 观察失败。
-- [ ] 实现 hook 与路由 schema；搜索输入使用项目可控防抖模式，测试用 fake timer，不加入固定 sleep。每组/模式的视角由下一任务画布保存，本 hook 保留业务选择。
-- [ ] 重跑测试与 typecheck，提交 `feat: manage topology loading and navigation state`。
+- [x] 写受控 Promise 测试：A 组详情在切换 B 后才完成，B 图不出现 A 渠道；同模型跨组不复用错误缓存。局部详情失败只显示对应模型重试入口，其余成功详情保留。
+- [x] 写搜索/分页/URL 测试：未加载模型可被服务端搜索找到，`org/model-a` 刷新可恢复；加载 50/120 时显示完整计数；第 51 个来自加载更多；展开当前加载集合最多 4 个并发且取消后不继续排队；空组不请求无效详情。
+- [x] 运行 `bun run test src/features/model-topology/__tests__/view-state.test.tsx` 观察失败。
+- [x] 实现 hook 与路由 schema；搜索输入使用项目可控防抖模式，测试用 fake timer，不加入固定 sleep。每组/模式的视角由下一任务画布保存，本 hook 保留业务选择。
+- [x] 重跑测试与 typecheck，提交 `feat: manage topology loading and navigation state`。
 
 ## Task 5: 交互画布、节点、详情抽屉和辅助表格
 
@@ -144,13 +144,13 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 - `TopologyDetails(props: { selection: TopologySelection | null; view: TopologyViewState; onClose: () => void }): ReactElement`。
 - Graph 构建使用任务 3，业务操作使用任务 4；Canvas 视角通过 group/mode 键保存，不能由抽屉状态触发 fitView。
 
-- [ ] 写交互测试：展开按钮不误开抽屉、正文打开详情、选模型高亮其路径、共享渠道显示所选关系映射、折叠后焦点回模型；关闭抽屉保持画布状态并回焦。
-- [ ] 写只读/状态测试：Delete/Backspace 不移除节点、连接与节点拖动不可用，Controls 不提供可开启编辑的按钮；空/错/刷新/局部详情失败状态与加载更多都有可访问名称。
-- [ ] 运行 `bun run test src/features/model-topology/__tests__/canvas.test.tsx src/features/model-topology/__tests__/details.test.tsx`，确认失败。
-- [ ] 组合现有 Canvas、Node、Controls、Sheet、drawer-layout、数据表与状态组件；禁用连接/删除/节点拖动并开启画布平移，覆盖默认框选。只读 Controls 隐藏编辑开关；若公共封装需要扩展，使用可选 prop 保持原调用行为。
-- [ ] 加入静态边、关系标签、缩略图、缩放/适应窗口/定位选中/全部折叠。网络渠道共用信息在节点，模型特定优先级/映射在边和详情；配置边不使用 Animated。
-- [ ] 完成移动端全屏画布与纵向等价列表、长名称展开、键盘及文字状态；300 节点后显示继续加载入口，可逐批增加 300 节点，折叠后回收展示预算。
-- [ ] 重跑测试，执行受影响文件 lint 与 typecheck，提交 `feat: render interactive read-only topology views`。
+- [x] 写交互测试：展开按钮不误开抽屉、正文打开详情、选模型高亮其路径、共享渠道显示所选关系映射、折叠后焦点回模型；关闭抽屉保持画布状态并回焦。
+- [x] 写只读/状态测试：Delete/Backspace 不移除节点、连接与节点拖动不可用，Controls 不提供可开启编辑的按钮；空/错/刷新/局部详情失败状态与加载更多都有可访问名称。
+- [x] 运行 `bun run test src/features/model-topology/__tests__/canvas.test.tsx src/features/model-topology/__tests__/details.test.tsx`，确认失败。
+- [x] 组合现有 Canvas、Node、Controls、Sheet、drawer-layout、数据表与状态组件；禁用连接/删除/节点拖动并开启画布平移，覆盖默认框选。只读 Controls 隐藏编辑开关；若公共封装需要扩展，使用可选 prop 保持原调用行为。
+- [x] 加入静态边、关系标签、缩略图、缩放/适应窗口/定位选中/全部折叠。网络渠道共用信息在节点，模型特定优先级/映射在边和详情；配置边不使用 Animated。
+- [x] 完成移动端全屏画布与纵向等价列表、长名称展开、键盘及文字状态；300 节点后显示继续加载入口，可逐批增加 300 节点，折叠后回收展示预算。
+- [x] 重跑测试，执行受影响文件 lint 与 typecheck，提交 `feat: render interactive read-only topology views`。
 
 ## Task 6: 模型管理接入与国际化
 
@@ -158,26 +158,58 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 
 **Interfaces:** 新分区 ID `topology`，地址 `/models/topology`；由 `ModelTopology` feature 入口渲染。既有 metadata/vendors/deployments 分区与原默认入口保持行为。
 
-- [ ] 写页面测试：通过模型管理导航进入 topology，默认 tree，切换 network/table 保留业务选择；旧分区仍可访问；错误 URL 回退规则不变。测试普通用户/无渠道读取权限用户不会看到可用的敏感拓扑内容。
-- [ ] 在 web 运行 `bun run test src/features/model-topology/__tests__/page.test.tsx`，确认新增失败。
-- [ ] 接入分区、懒加载画布 feature，隐藏无关“新增模型/部署”操作；复用 existing selectors/toolbars，完整展示已加载/命中/全组计数及 basis 说明。
-- [ ] 按项目 i18n 技能完成 en、zh、zh-TW、fr、ru、ja、vi；英文源键保持平铺。执行 `bun run i18n:sync`，核对改动只包含本功能所需键；通用数值使用既有 format + toIntlLocale。
-- [ ] 验证中英文切换后控件、诊断、状态和数值随语言更新；运行 feature 测试与原 models 测试、typecheck、涉及文件 lint，提交 `feat: integrate group topology into model management`。
+- [x] 写页面测试：通过模型管理导航进入 topology，默认 tree，切换 network/table 保留业务选择；旧分区仍可访问；错误 URL 回退规则不变。测试普通用户/无渠道读取权限用户不会看到可用的敏感拓扑内容。
+- [x] 在 web 运行 `bun run test src/features/model-topology/__tests__/page.test.tsx`，确认新增失败。
+- [x] 接入分区、懒加载画布 feature，隐藏无关“新增模型/部署”操作；复用 existing selectors/toolbars，完整展示已加载/命中/全组计数及 basis 说明。
+- [x] 按项目 i18n 技能完成 en、zh、zh-TW、fr、ru、ja、vi；英文源键保持平铺。执行 `bun run i18n:sync`，核对改动只包含本功能所需键；通用数值使用既有 format + toIntlLocale。
+- [x] 验证中英文切换后控件、诊断、状态和数值随语言更新；运行 feature 测试与原 models 测试、typecheck、涉及文件 lint，提交 `feat: integrate group topology into model management`。
 
 ## Task 7: 实例验证、浏览器验收与交付
 
 **Files:** 只修正本功能问题；将实际命令/版本/结果回填本计划末尾，不编造结果。
 
-- [ ] 核对任务 1/2 fixture 的三引擎子测试没有 SKIP；使用专用测试数据库与已配置 `TEST_MYSQL_DSN`、`TEST_POSTGRES_DSN`，不要打印 DSN。确需本地容器时只创建可清理的测试实例，不连接生产数据。
-- [ ] 运行 `go test ./controller -run 'TestModelTopology' -count=1 -v`、`go test ./router -run 'TestModelTopology|Test.*Channel' -count=1 -v`。记录 SQLite/MySQL/PostgreSQL 的真实版本及每个子测试结果；新查询无版本特性依赖时各覆盖一个支持版本即可。
-- [ ] 在 web 运行 `bun run test src/features/model-topology/__tests__ src/features/models/__tests__`、`bun run typecheck`、`bun run build`；对修改文件执行项目 oxlint（从 web 运行 `bunx --no-install oxlint -c .oxlintrc.json <修改的文件路径>`），修复 error。
-- [ ] 启动本地 dev server，按可用浏览器技能检查真实 React Flow：缩放、拖动画布、缩略图、命中框、抽屉焦点、窄屏切换、模式转换及长名称；用明确 fixture 检查同渠道不同映射、50 模型分页与超过 300 节点的继续加载。保存可复现证据；jsdom 无法替代实际画布验证。
-- [ ] 检查最终 diff：无认证/凭据泄露、无 schema/runtime/billing 改动、无依赖升级、无署名改动、无夹带原有维护规则变更。运行 `git diff --check`。
-- [ ] 执行方法若允许独立 reviewer，安排一次全分支审查；否则由执行者逐条对照验收清单复核并明确没有独立审查。不要自行扩大用户批准的代理执行范围。
-- [ ] 汇总实现、命令、实际数据库版本、浏览器验收与限制。任一必需验证缺失则标明未完成，不创建或合并 PR，除非用户另行要求。
+- [x] 核对任务 1/2 fixture 的三引擎子测试没有 SKIP；使用专用测试数据库与已配置 `TEST_MYSQL_DSN`、`TEST_POSTGRES_DSN`，不要打印 DSN。确需本地容器时只创建可清理的测试实例，不连接生产数据。
+- [x] 运行 `go test ./controller -run 'TestModelTopology' -count=1 -v`、`go test ./router -run 'TestModelTopology|Test.*Channel' -count=1 -v`。记录 SQLite/MySQL/PostgreSQL 的真实版本及每个子测试结果；新查询无版本特性依赖时各覆盖一个支持版本即可。
+- [x] 在 web 运行 `bun run test src/features/model-topology/__tests__ src/features/models/__tests__`、`bun run typecheck`、`bun run build`；对修改文件执行项目 oxlint（从 web 运行 `bunx --no-install oxlint -c .oxlintrc.json <修改的文件路径>`），修复 error。
+- [x] 启动本地 dev server，按可用浏览器技能检查真实 React Flow：缩放、拖动画布、缩略图、命中框、抽屉焦点、窄屏切换、模式转换及长名称；用明确 fixture 检查同渠道不同映射、50 模型分页与超过 300 节点的继续加载。保存可复现证据；jsdom 无法替代实际画布验证。
+- [x] 检查最终 diff：无认证/凭据泄露、无 schema/runtime/billing 改动、无依赖升级、无署名改动、无夹带原有维护规则变更。运行 `git diff --check`。
+- [x] 执行方法若允许独立 reviewer，安排一次全分支审查；否则由执行者逐条对照验收清单复核并明确没有独立审查。不要自行扩大用户批准的代理执行范围。
+- [x] 汇总实现、命令、实际数据库版本、浏览器验收与限制。任一必需验证缺失则标明未完成，不创建或合并 PR，除非用户另行要求。
 
 ## 计划自审与当前验证状态
 
 已对照设计核对：分组来源、auto 说明、模型/渠道事实、能力诊断、映射、两种图模式、辅助表格、只读限制、分页预算、搜索、视角、权限、i18n、移动端和上游兼容均有对应任务。业务指标与账单同步明确排除。
 
-本轮只编写计划；上述实现步骤和验证命令均未执行。实施时先确认测试实例可用性，再按任务打勾并记录实际结果。
+实施与验证已完成；独立审查结论及其修正记录见后续补充。
+
+
+## 实施与验证记录（2026-10-10）
+
+实现分支为 `codex/group-model-topology`，托管工作树为 `/Users/liyongsheng/.codex/worktrees/group-model-topology/new-api`。入口是模型管理的“分组模型链路”分区，URL 为 `/models/topology`。本次完成第一交付的配置拓扑，访问/性能指标、真实请求追踪及业务后台账单同步仍按需求文档另行实施。
+
+实现保持 channels/abilities/分组配置为既有事实来源，新增三个受 AdminAuth + ChannelRead 保护的只读接口。字段投影排除凭据，不发起 relay 请求、不刷新路由缓存、不修改 schema、计费、鉴权机制或旧模型管理契约。回滚可移除新增接口注册、topology 分区与独立 feature；没有数据迁移或数据清理。上游同步重点是入口文件与渠道映射/路由语义变化；后端聚合及图投影集中在新增模块。
+
+复用了 GroupSelector、StaticDataTable、Sheet/drawer-layout、LoadingState/ErrorState/EmptyState 以及 ai-elements Canvas/Node。现有组件没有配置拓扑的节点投影、分层布局或全屏画布，故这些为 feature 业务组合；全屏通过 React portal 避免祖先容器裁切。共享 Canvas 仅增加可选 controlsProps，默认交互控件保持原行为；GroupSelector 补充分组触发器可访问名称。沿用现有 React Flow 版本，仅将已使用的包归入运行时 dependencies，没有升级依赖。
+
+实际运行命令与结果：
+
+- 设置专用测试实例的 TEST_MYSQL_DSN、TEST_POSTGRES_DSN 后，运行 `go test ./controller ./router -run 'TestModelTopology|Test.*Channel' -count=1 -v`：两个包 PASS；拓扑数据库矩阵 SQLite **3.50.4**、MySQL **8.0.46**、PostgreSQL **17.9** 全部 PASS，无 SKIP。测试覆盖配置/能力不一致、空/孤立分组、映射链/循环/损坏/64 步边界、分页筛选、状态码、凭据排除和 ChannelRead 授权。新查询未依赖版本专有 SQL，没有 schema/migration 变更。
+- `cd web && bun run test src/features/model-topology/__tests__ src/features/models/__tests__ src/components/ai-elements/__tests__ src/components/model-group-selector/__tests__`：**17 个文件，101 个测试 PASS**（Bun 1.4.3 使用临时路径运行）。
+- `cd web && bun run typecheck`：PASS。
+- `cd web && bun run build`：PASS（Rsbuild 2.1.6）。
+- 对新增 feature、共享 Canvas/GroupSelector、models 接入与路由修改运行项目 oxlint：0 error；保留一个 prefer-query-selector 提示，焦点恢复使用 getElementById 支持包含 JSON 元组/模型特殊字符的安全 ID。
+- `bun run i18n:sync`：7 个语言文件所需键齐全，0 missing；既有译文值未改动。
+- `git diff --check`：PASS。主工作区未提交的维护政策改动保持原状，不夹带到功能提交。
+
+浏览器使用专用 SQLite fixture、测试账号与本地端口 23930/23931，未向供应商发起请求。验证了 58 个模型的 50→58 分页、全组搜索带 `/` 的长模型名、335 节点的 300→335 继续展示及视角保持、同渠道 A→vendor-X/B→vendor-Y 的关联独立展示、共享渠道抽屉、树/网络/表格切换、缩放/平移与只读 Delete/Backspace、缩略图控件、390px 窄屏（scrollWidth=390）、全屏 portal（实际 bounds 为 0,0,1280,800）、empty/auto 分组及中英文显示。验收中修复了 URL 选择同步、优先级布局边界、初始视角和全屏裁切；相应回归先观察失败再修正通过。
+
+集成选择保留给用户：当前保留独立 feature 分支和工作树，未合并、推送或创建 PR。正式集成到定制分支时需同时纳入主工作区已确认的维护政策变更。测试实例和测试服务在交付后清理。
+
+
+### 独立审查与修正
+
+一次独立 `gpt-6-astra` 全分支审查（1636789..f1c3f37）未发现 Critical 问题；三个用户可见问题已在一次修正轮处理：禁用渠道网络关系优先级改取真实渠道配置；详情字典使用无原型对象以支持 `constructor`、`toString`、`__proto__` 等合法模型名；表格同一事件中的展开和选中采用函数式状态更新。对应 5 个回归用例先失败，修正后通过，完整相关前端测试为 101/101。未进行重复代理审查。
+
+延期的小项：分组选择器目前显示名称及 auto 说明，尚不显示模型数、启用渠道数及普通分组的异常摘要；选择分组后可查看计数与诊断。此项保留为后续体验优化，不将当前实现描述为已完成选择器摘要。
+
+范围裁定维持设计：历史访问/账单指标留在第二交付；真实请求决策、多实例实时缓存、用户/Token 的 auto 展开不在首版；provider adaptor/plugin 的额外名称改写不从渠道映射推断。相应限制已在页面及详情提示。
