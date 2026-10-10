@@ -30,10 +30,14 @@ import { useAuthStore } from '@/stores/auth-store'
 const modelsSearchSchema = z.object({
   tGroup: z.string().optional(),
   tModel: z.string().optional(),
-  tMode: z.enum(['tree','network','table']).optional().catch('tree'),
+  tMode: z.enum(['tree', 'network', 'table']).optional().catch('tree'),
   tSearch: z.string().optional(),
   tChannel: z.string().optional(),
-  tStatus: z.enum(['all','enabled','disabled','inconsistent']).optional().catch('all'),
+  tChannelId: z.number().int().positive().optional().catch(undefined),
+  tStatus: z
+    .enum(['all', 'enabled', 'disabled', 'inconsistent'])
+    .optional()
+    .catch('all'),
   tMapping: z.boolean().optional().catch(undefined),
   tDiagnostics: z.boolean().optional().catch(undefined),
   vPage: z.number().optional().catch(1),
