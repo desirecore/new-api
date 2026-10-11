@@ -312,3 +312,32 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 为了验证后续整个后台契约，而不改正式业务源代码，仓库外 `secure-probe-adapter.cjs` 对原有契约探针做显式 fixture 适配：管理员密码重置/清理取得单次 proof；用户登录后以本人密码取得 access_token.generate proof，调用 POST /api/user/access_tokens，读取 data.token 交回旧探针；其余调用沿用原探针。原探针中的 GET /api/user/token 标签因此是被转换的旧调用标签，并不意味着旧端点恢复。旧 cookie 对照请求继续直达网关，没有绕过鉴权。
 
 该适配探针用 Node 和 desirecore-server 实际 dist/newapi/schemas.js 运行，退出 0：创建、搜索、密码重置、登录、新 PAT、API Key 创建/搜索/明文读取、用户和 Token 分组读取/更新、额度 override、定价目录共 14 步全部通过。结果保存在私有 business-adapted-probe.log。未修改 desirecore-server 的 client.ts、环境变量或线上凭据；此项只证明明确的安全适配路径可行，不等于正式业务实现已适配或发布阻碍已全部消除。
+
+
+### 2026-10-11 SSH 恢复后的完整生产副本验收
+
+本节取代此前“生产副本因 SSH 未完成”的当前状态；历史失败记录保留。SSH 恢复后进一步确认大流量 `kubectl exec` 会被 API Server 重置。仓库外 `export-chunked.py` 改为在 devtest-system/mysql-0 内异步生成一致性压缩备份，再以 8 MiB 分块下载，不重复扫描生产表。下载后比对远端/本地 SHA-256、完整解压校验 gzip CRC 和 SQL dump 完成标记，最后删除远端私有临时目录及配置文件。未修改生产数据或 Deployment。
+
+完整备份来源 MySQL **8.0.35**，压缩 **81949368 bytes**，解压 **1107087540 bytes**，SHA-256 `d461e1859d7fb7350931e2c3aa6e25b60d9ff9614f63642110d6b02ed9e2cbcd`。备份和连接/认证资料仅保存在仓库外私有目录，不提交仓库。
+
+实际执行 `python3 rehearsal.py restore`，导入隔离 MySQL **8.0.46** 成功。执行 `python3 production-rehearsal.py`：
+
+- 升级前原始数据为 users **334**、tokens **368**、channels **57**、abilities **883**、tasks **350**、logs **1504730**。
+- rc.43 首次启动、第二次启动、回切 rc.33 三步中，全部六表原有列的行数及 SHA-256 行摘要聚合指纹均保持一致；不是只比较总额度。原管理员 legacy PAT 可读取用户。
+- 两次 rc.43 启动后的完整列定义和索引定义摘要相同：`48cdd4cd7317c48044f3db886bdb33223edc31728689749373d692b09e309544`；LegacyAccessTokenRetireAt 值也相同，没有重启延长过渡期。
+- 拓扑接口读取 **5** 个分组、完整分页 **283** 条分组/模型关系，无跳页或重复；抽查 **13** 个模型的链路详情，响应没有 key/base_url 等敏感字段。
+- 回切 rc.33 后原数据及 API 读取通过。此处证明已有生产数据的升级与回退，不泛化为所有 rc.43 新功能写入后的 rc.33 语义兼容。
+
+`python3 production-options-audit.py` 从完整备份独立恢复原 options 表，逐项比对 value 的 SHA-256：**46** 个已有配置无变化，仅新增 LegacyAccessTokenRetireAt。生产定价配置没有被官方默认值覆盖。
+
+`python3 historical-task-read.py` 使用隔离副本中相应任务所有者的有效 API Key，只读取已有任务，不获取媒体、不提交新供应商任务。rc.33 与 rc.43 各检查 **12** 个历史任务：Alibaba/HappyHorse 1.1 的成功和失败记录、两条 HappyHorse 1.0-t2v 成功记录、两种 MiniMax 存储平台及 Doubao 历史记录，全部 HTTP 200，公共 ID 和终态一致。读取历史 HappyHorse 1.0 不要求重新声明其提交能力。
+
+生产插件/旧补丁核对：无持久化自定义任务插件、无未完成任务；消费历史只有 HappyHorse 1.0-t2v 两条，当前渠道未声明 PR 4810 的 Wan2.7 视频或 HappyHorse 1.0 模型。当前没有需要承接的旧补丁在途任务或启用提交路径，因此不因这次升级强行移植已停用能力；历史数据不删除。未来重新启用这些模型或旧式 Wan2.7 视频 1080P 价格时，仍需移植并验证，不把官方缺失的支持描述成已实现。
+
+`python3 production-image-price-check.py` 将真实 Wan2.7-image-pro 固定价格 **1** 与 default 分组倍率 **0.9** 应用到独立合成 fixture，仅调用内部模拟上游；实际图片完成后扣费 **450000 quota**，与 `1 × 0.9 × 500000 × 1 image` 相符，结束后恢复 fixture 原配置。生产副本未发送 relay 请求。
+
+后台原始契约探针对生产副本 rc.33 对照实例退出 **0**（14 步通过）；对生产副本 rc.43 退出 **1**，创建/搜索通过，在重置密码步骤返回 403，后续登录/PAT 级联失败。证实是版本契约变化，而非空库或模拟数据造成的假象。生产 root 的 MFA 已启用；上节无 MFA 合成管理员的密码 proof 适配结果不能用于绕过其策略。正式后台仍需迁移 scoped PAT，并解决自动开户/合并停用的服务身份与二次验证契约，不能仅新增一个 root 密码环境变量就认定适配完成。
+
+本轮成功读取的生产镜像摘要仍为 `sha256:d0436db6f653e88c88d74d1dbe5b0569565751ed1899bf54f1d49caca60ce849`。生产副本网关已停止；保留本地私有备份/结果及合成 fixture 服务。没有发布标签、镜像推送或生产部署。数据迁移、现有任务读取及明确计费 fixture 验收通过；**整体发布验收仍不通过，剩余为正式业务后台认证适配及既有候选推送权限限制**。本轮未修改业务后台代码或管理员 MFA。
+
+结束前重复读取 Deployment 的 SSH 签名再次停滞，已主动终止该只读检查；镜像摘要以上文本轮成功读取为准。这不影响已完成的备份完整性与隔离验收结果。
