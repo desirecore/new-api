@@ -301,3 +301,14 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 发布验收当前不通过：业务后台开户/自动禁用及 PAT 迁移需适配；真实生产副本检查尚未完成。没有创建发布标签、推送镜像或改动 deploy/main。GitHub workflow scope 的候选推送限制也仍未解决。
 
 拒绝的截断导出文件、0 字节重试文件及失败恢复的隔离目标库已清理；保留脱敏核对结果和独立 fixture。生产没有数据修改。
+
+
+### 2026-10-11 后台安全适配路径验证补充
+
+生产 SSH 复查仍未恢复：`BatchMode=yes` / `ConnectTimeout=10` 的检查在外部 20 秒截止前未完成签名，子进程已结束；未再次发起重导出，未把未完成连接当成有效等待进程。
+
+在现有隔离 MySQL fixture 上运行 `python3 admin-pat-proof.py`：18 项 HTTP 断言全部通过。新管理员 PAT 具备 user:read/user:write/log:read/profile:read 时，可使用管理员自身密码通过 `/api/verify` 取得 admin.user.update 或 admin.user.manage 的精确操作凭证，再执行重置、禁用和启用。跨用户和跨 action 均返回 403 SECURITY_PROOF_CONTEXT_MISMATCH，凭证重放返回 SECURITY_PROOF_CONSUMED；正确重置后的新密码登录通过，禁用状态经读取确认为 2，重新启用成功。该 fixture 管理员未启用 MFA，因此结果不代表生产管理员的二次验证方法；启用 MFA 的真实账户必须遵守服务端返回的验证策略，不能降级或绕过。
+
+为了验证后续整个后台契约，而不改正式业务源代码，仓库外 `secure-probe-adapter.cjs` 对原有契约探针做显式 fixture 适配：管理员密码重置/清理取得单次 proof；用户登录后以本人密码取得 access_token.generate proof，调用 POST /api/user/access_tokens，读取 data.token 交回旧探针；其余调用沿用原探针。原探针中的 GET /api/user/token 标签因此是被转换的旧调用标签，并不意味着旧端点恢复。旧 cookie 对照请求继续直达网关，没有绕过鉴权。
+
+该适配探针用 Node 和 desirecore-server 实际 dist/newapi/schemas.js 运行，退出 0：创建、搜索、密码重置、登录、新 PAT、API Key 创建/搜索/明文读取、用户和 Token 分组读取/更新、额度 override、定价目录共 14 步全部通过。结果保存在私有 business-adapted-probe.log。未修改 desirecore-server 的 client.ts、环境变量或线上凭据；此项只证明明确的安全适配路径可行，不等于正式业务实现已适配或发布阻碍已全部消除。
