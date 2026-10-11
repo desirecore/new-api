@@ -267,3 +267,37 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 按用户“没冲突的话……一并发布”的条件，本轮发现上述功能兼容冲突，停止正式发布。候选保留供后续移植/验证；未创建正式版本标签、未触发镜像发布、未修改测试或生产 Deployment、未推进 deploy/main。下一次发布必须先处理 PR 4810 兼容及定价差异、确认业务后台认证契约，并完成生产副本升级与回滚演练。
 
 候选推送尚未成功：GitHub HTTPS OAuth 凭据缺少 workflow scope，上游包含 workflow 变更，远端拒绝接收；SSH 推送无响应后已终止。没有为绕过限制删除上游 workflow 或更改全局 Git 凭据。候选提交保存在本地托管工作树。
+
+
+## 2026-10-11 隔离升级与业务契约验证（进行中）
+
+候选源代码仍为 `a94098ffc`，未改动运行时代码。验证二进制由该提交构建（本机及 Linux arm64，`CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build`），未注入正式 VERSION，因此页面显示未知版本；它们不是已发布镜像，也不能替代最终生产镜像的验收。
+
+验证目录位于仓库外的私有本地目录 `~/.codex/local-services/new-api-rc43-validation/`（目录 0700，连接信息和凭据文件 0600）。测试网关处于 Docker `--internal` 网络，没有外网默认路由；仅通过绑定 127.0.0.1 的固定目标反向代理访问。生产副本关闭 UPDATE_TASK，避免处理真实未完成任务；只有独立空库 fixture 开启任务轮询，使用内部模拟上游。生产与现有 test-newapi Deployment 均未修改，未发送供应商付费请求。
+
+### 已观察到的结果
+
+- `go test ./middleware ./service/... ./controller ./router ./common ./pkg/...`：PASS，包含认证/授权、二次验证、账务和插件运行时已有回归；日志保存在 `backend-security-billing.log`。此前前端 103 个测试、typecheck/build 及 relaykit 独立构建结果仍适用于未修改的候选代码。
+- PostgreSQL **16.15** 与 SQLite **3.50.4**：实际运行生产发布源码 `0ff70000a`（rc.33）创建数据库与测试用户，设置额度 9876543；切换候选启动两次，再回切 rc.33。每一步登录、用户资料和额度读取均通过。另对候选两次启动后的完整 schema/index 定义比较一致。命令 `python3 schema-matrix.py`、`python3 schema-idempotency.py`，结果见对应 JSON；这是独立 fixture，不能描述成生产数据验证。
+- MySQL **8.0.46**：rc.43 空库初始化、管理员登录、业务管理接口与 relay 验证通过。`python3 mysql-released-schema.py` 的 rc.33 fixture → rc.43 两次启动 → rc.33 回退读取通过，用户资料/额度保留；另对两次候选启动后的 schema/index 定义比较一致。真实生产副本迁移仍未完成。
+- `python3 auth-contracts.py`：21 个断言通过，其中包含对预期拒绝的断言，不能解释为旧业务契约全部通过。普通用户创建、搜索分页、额度 override、普通分组更新、管理员消费日志、定价和 topology 读取可用；新 scoped PAT 创建、API Key 创建/搜索/读取、普通 PAT 的管理员权限拒绝、管理员创建的准确二次验证凭证及其重放拒绝均通过。
+- `python3 legacy-expiry.py`：合成的 32 字符旧 PAT 在过渡期内可读；重启未延长退役时间；到达截止值后返回 401 `ACCESS_TOKEN_LEGACY_RETIRED`。测试结束恢复 fixture 原配置。意味着已有业务 PAT 也必须在首次升级后 30 天内迁移，不能仅修复新用户开户。
+- 已独立复现旧业务流程的三处不兼容：管理员重置普通用户密码、自动 disable 用户需要 `X-Security-Proof`；普通用户通过旧 `GET /api/user/token` 换取 PAT 已不可用，该路径被 `/api/user/:id` 匹配后返回 403 `AUTH_INSUFFICIENT_PRIVILEGE`，不能仅以 404 描述。额度覆盖和普通分组同步不受这些验证凭证限制。
+- 使用 desirecore-server 原有 `apps/cloud-api/scripts/_newapi-contract-probe.cjs`，加载其实际 `dist/newapi/schemas.js`，以 Node 对隔离 rc.43 实例执行：退出 1。创建和反查通过，在重置密码步骤返回 403，继而登录及 PAT 步骤失败。后两个失败在该整链探针中属于级联，独立端点检查见上一项。未改业务后台源代码、未降低网关安全要求。
+- `python3 relay-contracts.py`、`python3 relay-followup.py` 与独立退款检查：实际 HTTP 的 OpenAI chat 模型映射、Qwen Claude `/v1/messages` 且 max_tokens=64、映射到 Wan2.7 的图片 JSON 生成、multipart 编辑、视频 JSON/multipart 提交及轮询终态均通过。内部模拟上游捕获到映射后模型名；fixture 单价 0.01 下，chat/image 实扣 5000 quota，5 秒视频实扣 25000 quota；图片上游 400 拒绝净扣费 0，失败视频终态 FAILURE、task quota=0，并单独验证用户余额退回预扣前值（预扣 25000，净扣费 0）。消费日志保留对应模型和扣费。这里只证明这些明确 fixture，不证明真实供应商网络或所有表达式定价。
+- 图片模拟器最初没有实现实际异步路径，曾得到 404/缺少 task_id；按捕获到的真实请求补全模拟器后通过，没有据此修改插件。OpenAI Images 协议未传递本次 fixture 的 metadata.upstream_mode，验收最终采用其真实默认异步路径，未将它误报为同步图片通过。
+- 浏览器对候选构建的 localhost:23933 实例登录，验证 default 的模型列表、fixture-image 单模型图和选中渠道后的弹窗内详情（优先级、权重、重定向可见）。使用合成账号/渠道，不在 UI 暴露生产密钥。
+
+认证检查参考 OWASP ASVS **5.0.0**、Authentication Cheat Sheet 和 Session Management Cheat Sheet，关注服务端权限、PAT 最小 scope、敏感操作凭证绑定与单次消费；本轮没有修改认证代码，也没有声称完成全量 ASVS 合规审计。来源：https://owasp.org/www-project-application-security-verification-standard/ 、https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html 、https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html 。
+
+### 生产副本阻碍与剩余验收
+
+通过 biz-k3s-01 的 devtest-system/mysql-0 客户端，对线上数据库做 `mysqldump --single-transaction --quick --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF --hex-blob`。一次导出中断，另一次命令返回 0、文件约 1.10 GB，但恢复发现 logs INSERT 被截断，缺少 dump 完成标记；因此拒绝把该文件作为有效备份，不能声称已完成生产副本恢复。已改为远端压缩、管道失败检查，并要求 gzip 完整性与 dump 结束标记验证后才允许恢复。
+
+重新导出时 1Password SSH Agent 无法签名：`communication with agent failed` / `Permission denied (publickey)`；已请求用户解锁。未获取或绕过私钥。拒绝的部分导出中，完整 channels 表有 57 个渠道，没有声明 wan2.7-r2v/videoedit、happyhorse-1.0-* 或 wan2.7-t2v/i2v；这仅确认渠道配置，无法替代插件覆盖、历史任务和定价的完整核对。
+
+待完成：完整生产备份校验与恢复，关键表原有列的行数/指纹对比、rc.43 两次迁移 schema/index 与 legacy PAT 退役截止值稳定性、生产拓扑分组及模型读取、原有后台契约在 rc.33 对照实例的检查、旧补丁真实使用与价格配置核对，以及升级后 rc.33 回退读取。用于这些步骤的 `production-rehearsal.py` 已准备好，但未实际完成运行，不能列为 PASS。
+
+发布验收当前不通过：业务后台开户/自动禁用及 PAT 迁移需适配；真实生产副本检查尚未完成。没有创建发布标签、推送镜像或改动 deploy/main。GitHub workflow scope 的候选推送限制也仍未解决。
+
+拒绝的截断导出文件、0 字节重试文件及失败恢复的隔离目标库已清理；保留脱敏核对结果和独立 fixture。生产没有数据修改。
