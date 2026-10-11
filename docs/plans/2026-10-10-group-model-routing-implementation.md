@@ -265,3 +265,5 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 - rc.43 已通过 Alibaba task plugin 提供 wan2.7 图片协议，旧 rc.33 Wan 图片 Go 路由修复不能照搬；需要对实际映射与 JSON/multipart 接口验证后判定替代。
 
 按用户“没冲突的话……一并发布”的条件，本轮发现上述功能兼容冲突，停止正式发布。候选保留供后续移植/验证；未创建正式版本标签、未触发镜像发布、未修改测试或生产 Deployment、未推进 deploy/main。下一次发布必须先处理 PR 4810 兼容及定价差异、确认业务后台认证契约，并完成生产副本升级与回滚演练。
+
+候选推送尚未成功：GitHub HTTPS OAuth 凭据缺少 workflow scope，上游包含 workflow 变更，远端拒绝接收；SSH 推送无响应后已终止。没有为绕过限制删除上游 workflow 或更改全局 Git 凭据。候选提交保存在本地托管工作树。
