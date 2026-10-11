@@ -229,3 +229,39 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 原因：单模型图更新了底层模型抽屉选择，却未在前台弹窗渲染节点详情。复用 TopologyDetails 的内容，增加内嵌展示方式，在图弹窗内显示节点详情；桌面并排，窄屏上下排列，详情独立滚动。关闭面板保留图并恢复节点焦点，图关闭仍回到原模型抽屉。无新增依赖、翻译键或后端变更。
 
 先增加节点点击后详情在可访问面板内可见的失败用例，修复后 `bun run test src/features/model-topology`（7 文件、23 测试）、`bun run typecheck`、限定 feature 的 oxlint（无错误，原有 getElementById 警告保留）及 `bun run build` 均通过。浏览器验证 default / mimo-v2.5-pro / 潞晨科技节点的映射和优先级在弹窗内可见，全屏仍可查看；390×844 窄屏详情在画布下方，内容 overflow:auto 且可滚动；关闭详情保留链路图。本地 23930 服务已更新，保留既有脱敏数据库。
+
+
+## 2026-10-11 rc.43 合并检查与发布阻碍
+
+发布候选分支 `codex/release-rc43`，工作树 `/Users/liyongsheng/.codex/worktrees/release-rc43/new-api`，从官方 `v1.0.0-rc.43` 的 peeled SHA `c6741c36a9a1a729554ad94ee99f21602a214a23` 创建。通过带 `-x` 的 scoped cherry-pick 导入模型链路提交，未直接合并 moving main 或历史 compatibility 分支；模型链路代码集成至 `006ea494d`。未夹带 thinking-roundtrip 实现或主工作区未提交政策文件。
+
+文本冲突仅出现在七种 locale；保留 rc.43 的所有已有翻译键和值，再补入本功能译文，执行 i18n:sync。最终按 translation 字典逐键比较，每个语言新增 78 键，已有值无变化、无丢失。其余功能代码无文本冲突。
+
+### 已执行验证
+
+- `cd web && bun run typecheck`：exit 0。
+- `cd web && bun run test src/features/model-topology src/features/models src/components/ai-elements/__tests__ src/components/model-group-selector/__tests__`：18 文件、103 测试 PASS。
+- `cd web && bun run build`：exit 0。
+- `go test ./controller ./router ./service ./model ./plugins ./pkg/jsplugin ./relay/... ./setting/... ./pkg/billingexpr`：exit 0。此轮未配置外部数据库，不把被跳过的 DB 子测试当作三库验证。
+- 在本次新建的专用 loopback MySQL/PostgreSQL 容器上，设置 TEST_MYSQL_DSN 与 URL 格式的 TEST_POSTGRES_DSN，运行 `go test -count=1 -v ./controller -run ModelTopology`：SQLite 3.50.4、MySQL 8.0.46、PostgreSQL 16.15 三个数据库子测试全部 PASS，无 SKIP。首次 PostgreSQL 参数使用 keyword DSN，被测试 fixture 的 loopback 安全检查拒绝；改用 URL DSN 后通过，未修改测试绕过检查。
+- 同一专用实例运行 `go test -count=1 ./model`：exit 0，包含现有 schema 重启稳定性及各迁移回归测试。首次 keyword PostgreSQL DSN 被数据库选择逻辑误认为 MySQL，URL DSN 重跑通过。
+- `cd relaykit && GOWORK=off go build ./...`：exit 0。
+- `cd tokenkit && GOWORK=off go test ./...`：PASS。
+- `git diff --check`：PASS。
+
+这些检查不等于生产数据升级、计费集成及回滚演练。尚未复制当前生产数据库进行完整演练，也未宣称升级数据库可安全用于旧镜像。
+
+### 功能变化及兼容阻碍
+
+只读查询生产 `/api/status`，目前实际镜像版本仍为 `test-v1.0.0-rc.33-desirecore.1-20260910-0ff7000`，镜像 digest 为 `sha256:d0436db6f653e88c88d74d1dbe5b0569565751ed1899bf54f1d49caca60ce849`。因此生产升级范围为 rc.33→rc.43（215 个官方提交），不能只按开发基线 rc.41→rc.43 的 37 个提交评估。
+
+官方新增/调整包括模型与定价管理 UI、渠道模型重定向和请求策略、Responses WebSocket、插件化 OpenAI Images、搜索计费、图像数量结算、tokenkit、Go 1.26 和 moejs 运行时；rc.43 还增加 utils.fetch、按渠道跳过上游 TLS 校验（默认仍校验）、自动视频时长及多语言错误/日志。后台 Access Token 权限化及敏感管理操作二次验证需要业务后台联调；这里只记录变更范围，尚未完成完整认证安全审计或业务后台验收。
+
+已复现历史 PR 4810 补丁与 rc.43 的语义冲突：使用 Bun 分别导入生产镜像对应提交 `0ff70000a` 与候选中的 Alibaba factory plugin，以相同 fixture 调用 buildSubmitRequest/extractUsage（不发送供应商请求）：
+
+- `wan2.7-r2v`、`wan2.7-videoedit`、`happyhorse-1.0-t2v/i2v/r2v/video-edit`：生产提交中的 factory plugin 声明并可转换；rc.43 未声明，转换返回 `unsupported Wan model`。
+- `wan2.7-t2v/i2v`，duration=5、1080P、usagePurpose=billing_ratios：生产提交返回 seconds=5 和 resolution-1080P=1.6666666666666667；rc.43 仅返回 seconds=5。此差异影响仍使用旧式定价的配置，不能直接认定表达式定价已覆盖全部生产模型。
+- 当前旧脱敏快照中的 happyhorse-1.1 名称不是 PR 4810 添加的 1.0 模型，不因其存在就推断历史补丁已无用途；真实生产插件可能有管理员覆盖，尚需核对启用插件来源、调用记录和模型定价后决定保留兼容层或退役旧行为。
+- rc.43 已通过 Alibaba task plugin 提供 wan2.7 图片协议，旧 rc.33 Wan 图片 Go 路由修复不能照搬；需要对实际映射与 JSON/multipart 接口验证后判定替代。
+
+按用户“没冲突的话……一并发布”的条件，本轮发现上述功能兼容冲突，停止正式发布。候选保留供后续移植/验证；未创建正式版本标签、未触发镜像发布、未修改测试或生产 Deployment、未推进 deploy/main。下一次发布必须先处理 PR 4810 兼容及定价差异、确认业务后台认证契约，并完成生产副本升级与回滚演练。
