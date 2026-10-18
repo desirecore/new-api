@@ -359,3 +359,24 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 用户明确选择“先交付验证结果，后台适配另做”。本次验证工作据此结束，desirecore-server 正式认证适配、凭据配置和旧 PAT 迁移留待独立任务，不修改业务后台或生产环境。
 
 交付结论：rc.43 + 分组模型链路候选的构建、功能、三数据库和真实生产副本升级/二次启动/回退验证通过；原业务后台与 rc.43 的认证契约不兼容，整体生产发布验收仍不通过。服务账号 2 的隔离适配探针证明修复路径可行，不代替正式实现。候选分支仍为 codex/release-rc43，未发布标签、镜像或部署；推送仍受 GitHub workflow scope 限制。
+
+
+### 2026-10-18 rc.45 集成候选
+
+用户确认本轮范围：仅保留分组模型链路视图作为产品定制；thinking round-trip 放弃合入且无合并计划；Alibaba PR 4810 延续 rc.43 验收后的排除决定，不重新移植。历史部署记录保留在 docs/patches.md。
+
+在已有隔离 worktree 的 codex/release-rc45 分支，从 rc.43 候选 75f679894 合并官方 v1.0.0-rc.45（6cf0d90b5），保留双亲合并提交 c2153da71；未修改 main、deploy/main 或 thinking 工作分支。冲突仅在前端依赖、锁文件和七种语言资源：完整保留 rc.45 翻译，每种语言补回 78 个链路视图键；@xyflow/react 保持运行时依赖。模型链路生产代码相对 rc.43 未变，Alibaba 插件与官方 rc.45 完全一致。
+
+恢复 fork 的手动镜像发布工作流和定制分支维护规则；官方标签工作流排除 *-desirecore.* 标签，避免重复发布。镜像写入来源提交与版本标签；发布串行化，分支 manifest 从本次版本的架构镜像创建，避免并发构建混用提交。独立只读审查已复核该修复，无剩余 Critical/Important 发现；尚未实际执行 GitHub Actions。
+
+本轮已执行的验证：
+
+- Bun 1.4.0：bun install --frozen-lockfile、bun run i18n:sync、bun run typecheck、bun run build 通过；bun run test --maxWorkers=4 全量 207 文件 / 2392 测试通过。链路及相关优先级、导出、模型页面针对性测试 16 文件 / 129 测试也通过。
+- 实际修改范围的 oxlint 无错误，链路画布保留已有 prefer-query-selector 警告。额外扩大到整个 models 功能时，官方未改动文件有 4 个既有 lint 错误，本轮未扩展清理范围。
+- Go 自动工具链 go1.26.0：根模块原生构建与 Linux arm64 构建通过；relaykit 独立 GOWORK=off go test ./... 和 GOWORK=off go build ./... 通过。
+- go test ./controller ./router ./service ./middleware ./common ./pkg/... ./relay/... ./plugins ./setting/...：除 advancedcustom 的本机代理 DNS 用例外全部通过。本机 VPN 将保留的 .invalid 域名解析为虚拟 IP，导致预期 DNS 失败变为 EOF；将整个该包编译为 Linux 测试二进制并在 --network none 容器运行，全部通过。没有更改生产代码或放宽断言。
+- SQLite 3.50.4、MySQL 8.0.46、PostgreSQL 16.15：设置 TEST_MYSQL_DSN / TEST_POSTGRES_DSN 后，go test ./controller -run TestModelTopologyDatabaseMatrix -count=1 -v 与 go test ./model -count=1 均通过，使用隔离数据库，不修改生产。
+
+另运行仓库外 python3 rc45-migration-check.py，使用实际 rc.43/rc.45 Linux arm64 二进制完成 SQLite、MySQL 8.0.46、PostgreSQL 16.15 共六组应用验收（每种数据库分别新装、从 rc.43 升级）。每组 rc.45 启动两次，完整 schema/index 摘要一致，管理员登录、已有测试用户及额度 9876543 均保留；三组升级场景再回退 rc.43，登录及数据读取通过。所有场景使用新建隔离数据库/目录及合成账号，不导入或更改生产数据，不发送供应商请求。私有结果为 rc45-migration-results.json。测试不覆盖 rc.45 新功能写入后回退旧版本的所有业务语义，也没有覆盖最低数据库版本或独立 ClickHouse 日志库。
+
+尚未完成本轮 rc.45 的真实生产副本升级验收、业务后台端到端联调和 CI 镜像构建。旧 rc.43 的生产副本验收不能直接当作 rc.45 的结果；这份记录也不表示已经发布或部署 rc.45。本轮生产 SSH 只读检查超时，生产现状以上一次成功读取为准。
