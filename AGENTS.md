@@ -43,6 +43,22 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Rules
 
+### Fork Maintenance Rules
+
+- This fork supports sustained secondary development for our own product needs, including dedicated features and substantial UI changes. Upstream compatibility and the ability to continue integrating official updates are design priorities; local features do not have to be accepted upstream or treated as temporary patches.
+- Keep `main` as the upstream-mirror branch. Only sync official upstream changes into `main`; do not merge temporary external PRs or deployment-only patches there.
+- Use `deploy/main` as the long-lived customization and production integration branch, or use another explicitly documented branch. Develop local features on `codex/<topic>` branches and integrate them into the customization branch, not the upstream mirror.
+- Prefer extensions and focused changes to upstream internals when they meet the product need. Larger UI redesigns are allowed; preserve backend security enforcement, shared business components where suitable, i18n, accessibility, and protected project attribution.
+- Preserve upstream API and persisted-data semantics where practical. Dedicated behavior should use explicit extension fields, settings, endpoints, or suitable configuration gates rather than silently repurposing existing contracts. When incompatibility is necessary, record the affected contracts, migration and rollback approach, and upstream-sync impact in the change summary or PR description.
+- When syncing upstream into the customization branch, preserve intentional local features and UI changes while integrating applicable upstream fixes. Do not overwrite local customization wholesale or remove it solely because upstream offers a similar feature; compare the behavior and retain the required local differences.
+- Preserve provenance for external PRs. Keep raw imported PR code on `vendor/pr-<number>` branches without local edits; put local compatibility fixes on `compat/pr-<number>` or normal feature branches.
+- Long-lived local customization is described in its change summary or PR description; `docs/patches.md` remains the register for temporary patches and is not required for every local feature.
+- Every temporary patch intended for a deployment branch MUST be recorded in `docs/patches.md` before merge. Record the source PR/repository, imported branch, deployed branch, commit range, status, data impact, rollback plan, and expected official replacement path.
+- Read `docs/fork-maintenance.md` before planning local customization, integrating upstream updates, or importing, merging, reverting, or replacing external PRs that are not yet part of official upstream.
+- Prefer merge commits for temporary external PRs so the source boundary stays visible. Do not squash imported PR branches unless `docs/patches.md` records the reason.
+- Temporary patches should avoid destructive data changes. Prefer additive migrations, backward-compatible reads, dual writes when formats diverge, and feature flags for behavior that may need to be disabled during rollback.
+- When official upstream later merges an equivalent temporary patch, compare it against the patch record, remove only redundant local changes after validation, preserve required customization, and update the patch status in `docs/patches.md`.
+
 ### Common Code Quality
 
 - New code should stay direct and readable. Prefer early returns, clear branches, and well-named local variables to deep nesting or layered control flow.
