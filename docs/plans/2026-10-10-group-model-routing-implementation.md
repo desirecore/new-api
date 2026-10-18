@@ -380,3 +380,22 @@ expect(network.edges.find((edge) => edge.data?.model === 'B')?.data?.mapping.nam
 另运行仓库外 python3 rc45-migration-check.py，使用实际 rc.43/rc.45 Linux arm64 二进制完成 SQLite、MySQL 8.0.46、PostgreSQL 16.15 共六组应用验收（每种数据库分别新装、从 rc.43 升级）。每组 rc.45 启动两次，完整 schema/index 摘要一致，管理员登录、已有测试用户及额度 9876543 均保留；三组升级场景再回退 rc.43，登录及数据读取通过。所有场景使用新建隔离数据库/目录及合成账号，不导入或更改生产数据，不发送供应商请求。私有结果为 rc45-migration-results.json。测试不覆盖 rc.45 新功能写入后回退旧版本的所有业务语义，也没有覆盖最低数据库版本或独立 ClickHouse 日志库。
 
 尚未完成本轮 rc.45 的真实生产副本升级验收、业务后台端到端联调和 CI 镜像构建。旧 rc.43 的生产副本验收不能直接当作 rc.45 的结果；这份记录也不表示已经发布或部署 rc.45。本轮生产 SSH 只读检查超时，生产现状以上一次成功读取为准。
+
+
+### 2026-10-18 线上 rc.33 直接升级 rc.45 的专项评估
+
+本节补充上节尚未完成的 rc.45 生产历史副本和正式 server HTTP 认证验证，不表示上线批准或生产切换完成。候选仍为 4c837a19a，server 源码为 7a5b30e；本轮不修改生产数据、账号、部署或 server 源码。
+
+重新只读检查生产 k3s：new-api Deployment 仍为已核对的 rc.33 镜像摘要 d0436db6f653e88c88d74d1dbe5b0569565751ed1899bf54f1d49caca60ce849，1 个就绪副本；MySQL 8.0.35。用户 346、模型 Token 380、渠道 56、路由能力 861，未完成任务 0；未发现启用渠道声明 HappyHorse 1.0 或 Wan2.7 t2v/i2v 旧补丁模型。服务账号 2 的 role=10、status=1，MFA 未启用；套餐 1/2 均停用并允许钱包溢出。生产没有 LegacyAccessTokenRetireAt 配置。直接检查运行 Pod 的环境，SESSION_SECRET、CRYPTO_SECRET、LOG_SQL_DSN 均未设置，日志沿用主 MySQL；本次升级无需迁移 PostgreSQL。上线前应固定网关会话/签名密钥，并评估存量登录态及临时签名链接的失效影响。
+
+用 2026-10-11 的完整生产备份重新恢复到独立 rc45_production_assess_20261018 数据库，未复用或覆盖原验收数据库。备份数据为 users 334、tokens 368、channels 57、abilities 883、tasks 350、logs 1504730，明显早于当前线上数据，因此此项是代表性历史生产副本，不是当天最新快照。
+
+实际运行仓库外 python3 rc45-production-assess.py：rc.45 首次启动、再次启动、回切 rc.33，六表原有列的行数及行内容 SHA-256 聚合指纹全部保持一致。两次 rc.45 的完整列/索引摘要均为 8ec4bcc918369d263924b134ff5d3cd7bb34694fe62f4991cebe315b7246c72a，旧 PAT 退役时间保持不变。链路接口读取 5 分组、完整分页 283 条分组/模型关系，抽查 13 个模型详情，无重复/遗漏或 key/base_url 泄漏。46 项原 options 的值摘要均未变化，仅新增 LegacyAccessTokenRetireAt；这不等于所有模型的新旧计费行为已做真实供应商调用验证。测试环境为 MySQL 8.0.46，生产为 8.0.35；先前三数据库矩阵仍适用，不将其描述为所有最低版本验证。
+
+实际运行 python3 rc45-server-formal-check.py：在独立副本临时用合成密码替换服务账号 2 的密码哈希，保留其角色和 MFA 状态，通过上游正常登录/verify/access_tokens 创建最小管理 PAT，再用现有 server 正式源码运行 tests/integration/newapi-scoped-auth.integration.test.ts。1 文件/1 完整链路用例通过，包含创建用户、proof 密码重置、用户 scoped PAT、模型 Key 创建/明文读取、同名 PAT 拒绝重复、proof 停权及停权后拒绝访问。结束后恢复并核对账号 2 的原密码哈希，停止测试网关。没有连接真实业务数据库执行完整 provision、额度账本或日志同步编排。server 的适配代码已存在，不能继续描述为“尚未实现”，但默认协议仍为 legacy，未核实线上 server 实际发布与环境配置。
+
+实际运行 python3 rc45-history-assess.py：rc.33 与 rc.45 各读取 12 个历史任务，全部 HTTP 200，公共 ID 对应且终态保留，包括 HappyHorse 1.0 的历史记录。未提交新供应商任务、下载媒体或产生真实模型费用；这不恢复旧补丁模型的新提交能力。
+
+评估结论：可直接由 rc.33 升级，无需先经过 rc.43；数据升级和旧数据回退的证据已补齐。上线前仍须完成：(1) 线上 server 确认支持并显式切换 scoped，配置服务账号验证凭据和新管理员 PAT；(2) 存量管理 PAT 在首次升级后的 30 天内迁移，并保留回切 legacy 所需的旧凭据/业务库状态，已有模型 API Key 与管理 PAT 分开处理；(3) 对候选提交构建可追溯的 linux/amd64 OCI 制品，以当天最新备份和实际业务数据库进行短流程联调。当前裸换镜像会使旧开户/重置密码/停权流程遇到新认证要求，不能以“旧 PAT 还有过渡期”推断这些操作可继续使用旧流程。
+
+生产单副本应安排短维护窗口，先暂停开户/账号合并和任务提交、排空长连接，备份并记录旧镜像与 server 配置，再切换并验证模型请求、额度变更和日志同步。数据库可回切 rc.33 不代表新 scoped PAT 能用于 rc.33；需同时回切 server 协议/服务凭据，并考虑升级后新用户、账本及凭据写入，不能简单覆盖数据库备份而丢弃新增账务。正式生产验收仍有上述发布与迁移条件。
