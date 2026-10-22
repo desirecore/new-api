@@ -199,6 +199,14 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Check native image version
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.published.outputs.digest || steps.build.outputs.digest }}
+        run: |
+          ACTUAL=$(docker run --rm --network none "$TENCENT_IMAGE@$IMAGE_DIGEST" --version)
+          test "$ACTUAL" = "$RELEASE_VERSION"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
@@ -221,6 +229,7 @@ jobs:
     needs: [prepare, build_single_arch]
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       id-token: write
       packages: write
     steps:
@@ -278,3 +287,38 @@ jobs:
           echo "---" >> "$GITHUB_STEP_SUMMARY"
           docker buildx imagetools inspect ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }} >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release metadata and upgrade guide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir release-files
+          gh api "repos/$GH_REPO/contents/docs/releases/$RELEASE_VERSION.md?ref=$SOURCE_SHA" \
+            --jq '.content' | base64 --decode > release-files/UPGRADE.md
+          for REGISTRY in ghcr tencent; do
+            if [ "$REGISTRY" = ghcr ]; then IMAGE="$GHCR_IMAGE"; else IMAGE="$TENCENT_IMAGE"; fi
+            INDEX=$(docker buildx imagetools inspect "$IMAGE:$RELEASE_VERSION" --format '{{.Manifest.Digest}}')
+            AMD64=$(docker buildx imagetools inspect "$IMAGE:$RELEASE_VERSION-amd64" --format '{{.Manifest.Digest}}')
+            ARM64=$(docker buildx imagetools inspect "$IMAGE:$RELEASE_VERSION-arm64" --format '{{.Manifest.Digest}}')
+            jq -n --arg index "$IMAGE@$INDEX" --arg amd64 "$IMAGE@$AMD64" --arg arm64 "$IMAGE@$ARM64" \
+              '{index:$index,amd64:$amd64,arm64:$arm64}' > "release-files/$REGISTRY.json"
+          done
+          UPSTREAM_VERSION=${RELEASE_VERSION%-desirecore.*}
+          jq -n --arg version "$RELEASE_VERSION" --arg source_sha "$SOURCE_SHA" \
+            --arg upstream_version "$UPSTREAM_VERSION" --arg build_url "$BUILD_URL" \
+            --slurpfile ghcr release-files/ghcr.json --slurpfile tencent release-files/tencent.json \
+            '{version:$version,source_sha:$source_sha,upstream_version:$upstream_version,build_url:$build_url,images:{ghcr:$ghcr[0],tencent:$tencent[0]},deploys_production:false}' \
+            > release-files/release-metadata.json
+          (cd release-files && sha256sum release-metadata.json UPGRADE.md > SHA256SUMS)
+          printf 'Official baseline: %s\n\nSource: %s\n\nVerified multi-architecture container build: %s\n\nIncludes the group/model topology view. See UPGRADE.md and release-metadata.json for image digests and the rc.33 upgrade requirements. Publishing this release does not deploy production.\n' \
+            "$UPSTREAM_VERSION" "$SOURCE_SHA" "$BUILD_URL" > release-files/NOTES.md
+          if ! gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release create "$RELEASE_VERSION" --verify-tag --target "$SOURCE_SHA" \
+              --title "New API $RELEASE_VERSION" --prerelease --notes-file release-files/NOTES.md
+          fi
+          gh release upload "$RELEASE_VERSION" release-files/release-metadata.json \
+            release-files/UPGRADE.md release-files/SHA256SUMS --clobber
