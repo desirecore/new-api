@@ -127,3 +127,8 @@ Describe how to compare this patch with the official upstream version and what d
 #### History
 
 - `YYYY-MM-DD`: Created entry.
+
+
+### 2026-10-22 Product Branch Transition
+
+The current product integration branch is `desirecore/main`, initialized from the verified rc.45 topology candidate. The release candidate is `release/v1.0.0-rc.45-desirecore.1`. Old `main`, `deploy/main`, and `codex/*` refs remain for provenance; their historical deployment entries above are not rewritten. PR 4810 stays excluded from this candidate. Thinking round-trip stays excluded with no integration plan. Clean official synchronization uses `upstream/main`; product version tags and image digests identify releases independently of production rollout.

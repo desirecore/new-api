@@ -1,6 +1,19 @@
 name: CI
 
 on:
+  push:
+    branches: [desirecore/main, 'release/**']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source ref to verify
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
   pull_request:
     types: [opened, synchronize, closed]
 
@@ -18,7 +31,7 @@ jobs:
     name: Backend vet, build, and test
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       GOWORK: 'off'
 
@@ -26,8 +39,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: ${{ github.event.pull_request.base.repo.full_name }}
-          ref: ${{ github.sha }}
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -72,7 +85,7 @@ jobs:
     name: Frontend typecheck and test
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -81,8 +94,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: ${{ github.event.pull_request.base.repo.full_name }}
-          ref: ${{ github.sha }}
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -97,3 +110,42 @@ jobs:
 
       - name: Test
         run: bun run test
+
+  databases:
+    name: SQLite, MySQL, PostgreSQL contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-fixture-only
+          MYSQL_DATABASE: newapi_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-fixture-only"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-fixture-only
+          POSTGRES_DB: newapi_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    env:
+      GOWORK: 'off'
+      TEST_MYSQL_DSN: 'root:ci-fixture-only@tcp(127.0.0.1:3306)/newapi_ci?charset=utf8mb4&parseTime=True&loc=Local'
+      TEST_POSTGRES_DSN: 'postgres://postgres:ci-fixture-only@127.0.0.1:5432/newapi_ci?sslmode=disable'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Verify model contracts on three real databases
+        run: go test ./model -count=1
+      - name: Verify topology contracts on three real databases
+        run: go test ./controller -run TestModelTopologyDatabaseMatrix -count=1 -v

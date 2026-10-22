@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build (branch, tag, or SHA; e.g. deploy/main)"
+        description: "Git ref to build (branch, tag, or SHA; e.g. desirecore/main)"
         required: true
-        default: "deploy/main"
+        default: "desirecore/main"
         type: string
-      tag_prefix:
-        description: "Docker tag prefix (optional; defaults to sanitized ref)"
-        required: false
+      version:
+        description: 'Immutable release tag (e.g. v1.0.0-rc.45-desirecore.1)'
+        required: true
         type: string
 
 concurrency:
@@ -30,7 +30,6 @@ jobs:
     outputs:
       ref: ${{ steps.version.outputs.ref }}
       sha: ${{ steps.version.outputs.sha }}
-      tag_prefix: ${{ steps.version.outputs.tag_prefix }}
       version: ${{ steps.version.outputs.version }}
     permissions:
       contents: read
@@ -38,7 +37,7 @@ jobs:
       - name: Check out ref
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           ref: ${{ inputs.ref }}
 
       - name: Validate image configuration
@@ -52,34 +51,38 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve Docker tags
+      - name: Resolve immutable release
         id: version
         env:
           SOURCE_REF: ${{ inputs.ref }}
-          TAG_PREFIX_INPUT: ${{ inputs.tag_prefix }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          RAW_TAG_PREFIX="${TAG_PREFIX_INPUT:-$SOURCE_REF}"
-          TAG_PREFIX=$(printf '%s' "$RAW_TAG_PREFIX" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
-          TAG_PREFIX=${TAG_PREFIX:0:105}
-          TAG_PREFIX=$(printf '%s' "$TAG_PREFIX" | sed -E 's/[.-]+$//')
-          if [ -z "$TAG_PREFIX" ]; then
-            echo "::error::Ref/tag '$RAW_TAG_PREFIX' cannot be converted to a valid Docker tag prefix"
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?-desirecore\.[0-9]+$ ]] || [ "${#RELEASE_VERSION}" -gt 110 ]; then
+            echo "::error::Expected an explicit desirecore release version"
             exit 1
           fi
-
           SHA=$(git rev-parse HEAD)
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="${TAG_PREFIX}-$(date +'%Y%m%d')-${SHORT_SHA}"
-
+          TAG_SHA=$(git rev-parse --verify "refs/tags/${RELEASE_VERSION}^{commit}")
+          if [ "$TAG_SHA" != "$SHA" ]; then
+            echo "::error::Release tag does not identify the requested source commit"
+            exit 1
+          fi
           echo "ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "tag_prefix=$TAG_PREFIX" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Prepared Docker tags for $SOURCE_REF at $SHORT_SHA"
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify release source
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+    permissions:
+      contents: read
 
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
-    needs: [prepare]
+    needs: [prepare, verify]
     strategy:
       fail-fast: false
       matrix:
@@ -124,6 +127,50 @@ jobs:
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
+      - name: Resolve or resume immutable architecture image
+        id: published
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          EXISTING_REF=""
+          EXISTING_DIGEST=""
+          MISSING_REFS=()
+          for IMAGE in "$GHCR_IMAGE" "$TENCENT_IMAGE"; do
+            REF="$IMAGE:$RELEASE_VERSION-$ARCH"
+            if RAW=$(docker buildx imagetools inspect --raw "$REF" 2>&1); then
+              DIGEST=$(docker buildx imagetools inspect "$REF" --format '{{.Manifest.Digest}}')
+              PLATFORM_DIGEST=$(jq -r --arg arch "$ARCH" '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else empty end' <<< "$RAW")
+              PLATFORM_DIGEST=${PLATFORM_DIGEST:-$DIGEST}
+              LABELS=$(docker buildx imagetools inspect "$IMAGE@$PLATFORM_DIGEST" --format '{{json .Image.Config.Labels}}')
+              if ! jq -e --arg sha "$SOURCE_SHA" --arg version "$RELEASE_VERSION" '."org.opencontainers.image.revision" == $sha and ."org.opencontainers.image.version" == $version' <<< "$LABELS" >/dev/null; then
+                echo "::error::Existing architecture image belongs to another release: $REF"
+                exit 1
+              fi
+              if [ -n "$EXISTING_DIGEST" ] && [ "$EXISTING_DIGEST" != "$DIGEST" ]; then
+                echo "::error::Registry architecture digests disagree"
+                exit 1
+              fi
+              EXISTING_REF="$IMAGE@$DIGEST"
+              EXISTING_DIGEST="$DIGEST"
+            elif grep -Eiq 'not found|manifest unknown|404' <<< "$RAW"; then
+              MISSING_REFS+=("$REF")
+            else
+              echo "::error::Cannot inspect release image: $REF"
+              exit 1
+            fi
+          done
+          if [ -n "$EXISTING_REF" ]; then
+            for REF in "${MISSING_REFS[@]}"; do
+              docker buildx imagetools create -t "$REF" "$EXISTING_REF"
+              COPIED_DIGEST=$(docker buildx imagetools inspect "$REF" --format '{{.Manifest.Digest}}')
+              test "$COPIED_DIGEST" = "$EXISTING_DIGEST"
+            done
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$EXISTING_DIGEST" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata (labels)
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
@@ -136,6 +183,7 @@ jobs:
             org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
 
       - name: Build & push single-arch
+        if: steps.published.outputs.reused != 'true'
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -143,9 +191,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}
             ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
-            ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}
             ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -158,18 +204,16 @@ jobs:
 
       - name: Sign image with cosign
         run: |
-          cosign sign --yes ${{ env.GHCR_IMAGE }}@${{ steps.build.outputs.digest }}
-          cosign sign --yes ${{ env.TENCENT_IMAGE }}@${{ steps.build.outputs.digest }}
+          cosign sign --yes ${{ env.GHCR_IMAGE }}@${{ steps.published.outputs.digest || steps.build.outputs.digest }}
+          cosign sign --yes ${{ env.TENCENT_IMAGE }}@${{ steps.published.outputs.digest || steps.build.outputs.digest }}
 
       - name: Output digest
         run: |
           echo "### Docker Image Digest (${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}-${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.published.outputs.digest || steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   create_manifests:
@@ -194,53 +238,43 @@ jobs:
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
-      - name: Create & push manifest (GHCR - branch)
+      - name: Publish or verify immutable multi-arch manifests
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          docker buildx imagetools create \
-            -t ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }} \
-            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-amd64 \
-            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-arm64
-
-      - name: Create & push manifest (GHCR - versioned)
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }} \
-            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-amd64 \
-            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}-arm64
-
-      - name: Create & push manifest (Tencent - branch)
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }} \
-            ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-amd64 \
-            ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-arm64
-
-      - name: Create & push manifest (Tencent - versioned)
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }} \
-            ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-amd64 \
-            ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}-arm64
+          for IMAGE in "$GHCR_IMAGE" "$TENCENT_IMAGE"; do
+            REF="$IMAGE:$RELEASE_VERSION"
+            PLANNED=$(docker buildx imagetools create --dry-run "$REF-amd64" "$REF-arm64")
+            if EXISTING=$(docker buildx imagetools inspect --raw "$REF" 2>&1); then
+              EXPECTED=$(jq -cS '{schemaVersion,mediaType,manifests:(.manifests|sort_by(.digest)),annotations}' <<< "$PLANNED")
+              ACTUAL=$(jq -cS '{schemaVersion,mediaType,manifests:(.manifests|sort_by(.digest)),annotations}' <<< "$EXISTING")
+              if [ "$EXPECTED" != "$ACTUAL" ]; then
+                echo "::error::Refusing to overwrite an existing release index: $REF"
+                exit 1
+              fi
+            elif grep -Eiq 'not found|manifest unknown|404' <<< "$EXISTING"; then
+              docker buildx imagetools create -t "$REF" "$REF-amd64" "$REF-arm64"
+            else
+              echo "::error::Cannot inspect release index: $REF"
+              exit 1
+            fi
+          done
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign manifests with cosign
         run: |
-          cosign sign --yes ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}
           cosign sign --yes ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }}
-          cosign sign --yes ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }}
           cosign sign --yes ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }}
 
       - name: Output manifest digest
         run: |
           echo "### Multi-arch Manifest Digests" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }} >> "$GITHUB_STEP_SUMMARY"
           echo "---" >> "$GITHUB_STEP_SUMMARY"
           docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.version }} >> "$GITHUB_STEP_SUMMARY"
           echo "---" >> "$GITHUB_STEP_SUMMARY"
-          docker buildx imagetools inspect ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.tag_prefix }} >> "$GITHUB_STEP_SUMMARY"
           echo "---" >> "$GITHUB_STEP_SUMMARY"
           docker buildx imagetools inspect ${{ env.TENCENT_IMAGE }}:${{ needs.prepare.outputs.version }} >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

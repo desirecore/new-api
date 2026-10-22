@@ -13,9 +13,9 @@ This fork is maintained as a customized product based on official upstream. Dedi
 
 ## Branch Roles
 
-- `main`: upstream mirror. Sync official upstream only.
-- `deploy/main`: long-lived customization and production integration branch. It contains dedicated local features, UI changes, and any temporary patches that are not yet upstream.
-- `codex/<topic>`: local feature or redesign branch, based on the customization branch and integrated back into it.
+- `upstream/main`: clean official upstream mirror. Sync official upstream only. Do not set it as the product default.
+- `desirecore/main`: repository default and long-lived customization and production integration branch. It contains dedicated local features, UI changes, and any temporary patches that are not yet upstream.
+- `feature/<topic>` or `fix/<topic>`: local feature or redesign branch, based on the customization branch and integrated back into it.
 - `vendor/pr-<number>`: raw imported external PR branch. Do not add local edits here.
 - `compat/pr-<number>`: local compatibility layer for a specific imported PR.
 - `hotfix/<topic>`: urgent local fix unrelated to a specific external PR.
@@ -37,24 +37,24 @@ Do not commit local git remote configuration; it lives in `.git/config`.
 
 ## Sync Official Upstream
 
-Keep `main` clean and fast-forwardable when possible:
+Keep `upstream/main` clean and fast-forwardable when possible:
 
 ```bash
 git fetch upstream
-git switch main
-git merge --ff-only upstream/main
-git push origin main
+git switch upstream/main
+git merge --ff-only refs/remotes/upstream/main
+git push origin upstream/main
 ```
 
-If fast-forward is not possible, stop and inspect why `main` diverged before resolving.
+If fast-forward is not possible, stop and inspect why `upstream/main` diverged before resolving.
 
 ## Integrate Upstream into the Customized Product
 
 After updating the upstream mirror, integrate it into the customization branch:
 
 ```bash
-git switch deploy/main
-git merge --no-ff main
+git switch desirecore/main
+git merge --no-ff upstream/main
 ```
 
 Review changes to shared APIs, settings, migrations, billing, authentication, and frontend components against the local customization. Preserve required local features and UI workflows while incorporating upstream fixes. Run the affected checks required by `AGENTS.md`, including the real database matrix when database behavior is affected.
@@ -70,7 +70,7 @@ git fetch upstream pull/<number>/head:vendor/pr-<number>
 git push origin vendor/pr-<number>
 ```
 
-Open a PR inside this fork from `vendor/pr-<number>` into `deploy/main`.
+Open a PR inside this fork from `vendor/pr-<number>` into `desirecore/main`.
 
 ## Import a Contributor Fork Branch
 
@@ -79,7 +79,7 @@ When the source is another fork and branch:
 ```bash
 git remote add contributor-<name> <contributor-repo-url>
 git fetch contributor-<name>
-git switch -c vendor/pr-<number> main
+git switch -c vendor/pr-<number> upstream/main
 git merge --no-ff contributor-<name>/<branch>
 git push origin vendor/pr-<number>
 ```
@@ -98,7 +98,7 @@ Before merging into a deployment branch:
 Merge with provenance preserved:
 
 ```bash
-git switch deploy/main
+git switch desirecore/main
 git merge --no-ff vendor/pr-<number>
 ```
 
@@ -121,21 +121,21 @@ When upstream merges an equivalent feature:
 
 ```bash
 git fetch upstream
-git switch main
-git merge --ff-only upstream/main
-git push origin main
-git switch deploy/main
-git merge --no-ff main
+git switch upstream/main
+git merge --ff-only refs/remotes/upstream/main
+git push origin upstream/main
+git switch desirecore/main
+git merge --no-ff upstream/main
 ```
 
 Then compare the local deployment delta:
 
 ```bash
-git log --cherry --oneline main...deploy/main
-git diff main...deploy/main
+git log --cherry --oneline upstream/main...desirecore/main
+git diff upstream/main...desirecore/main
 ```
 
-For shared deployment branches, prefer merging `main` into `deploy/main` over rebasing to avoid rewriting history. For a cleaner cutover, create a new deployment branch from `main` and merge or cherry-pick only the local patches that still matter.
+For shared deployment branches, prefer merging `upstream/main` into `desirecore/main` over rebasing to avoid rewriting history. For a cleaner cutover, create a new deployment branch from `upstream/main` and merge or cherry-pick only the local patches that still matter.
 
 After validation:
 
@@ -156,3 +156,16 @@ Use this checklist before merging a temporary external PR:
 - Rollback plan works without dropping production data.
 - Official replacement path is identified when known.
 - Tests or manual verification are recorded in the PR.
+
+
+## Product Release Policy (2026-10-22)
+
+The rc.45 candidate becomes the new product baseline. Existing `main`, `deploy/main`, and `codex/*` branches remain historical references; do not merge them wholesale into the product baseline. New branches use `feature/`, `fix/`, or `release/`, never `codex/`. Record release candidates as `release/<version>` and freeze each published version with an immutable annotated Git tag.
+
+Versions retain the official baseline and a product revision, for example `v1.0.0-rc.45-desirecore.1`, then `.2`; a new official baseline starts its product revision at `.1`. Keep the New API name, license, and QuantumNous attribution intact. Product releases do not imply deployment to production.
+
+CI runs on PRs, product/release branch pushes, manual requests, and calls from the release publisher. The publisher resolves a source commit, requires the matching release tag, then verifies that exact commit before building. It publishes native linux/amd64 and linux/arm64 images to Tencent and GHCR, sets the exact release version in VERSION and OCI labels, and assembles manifests from versioned architecture tags. Published release tags must not be reused. Deploy by registry digest, not by a moving branch tag.
+
+Use the workflow from the release branch or product branch explicitly; the workflow's source-ref input is distinct from the dispatch ref. Protect the product branch with required backend, frontend, and database checks, and use PRs for later changes. Keep upstream workflows for provenance and compatibility; their tag filters exclude desirecore release tags to prevent duplicate publication.
+
+For the rc.45 release, see [upgrade instructions](releases/v1.0.0-rc.45-desirecore.1.md). Existing production stays on rc.33 until the server authentication, PAT migration, current backup, and deployment-window conditions in that guide are satisfied.
